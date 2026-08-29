@@ -5,3 +5,6 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+~$*.docx
+draft_report_wip.docx
+*UPDATED.docx

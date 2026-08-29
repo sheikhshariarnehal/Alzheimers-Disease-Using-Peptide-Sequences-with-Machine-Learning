@@ -49,14 +49,14 @@ import seaborn as sns
 # GLOBAL STYLE
 # ─────────────────────────────────────────────────────────────
 plt.rcParams.update({
-    'figure.facecolor': '#0d1117',
-    'axes.facecolor':   '#161b22',
-    'axes.edgecolor':   '#30363d',
-    'axes.labelcolor':  '#c9d1d9',
-    'xtick.color':      '#c9d1d9',
-    'ytick.color':      '#c9d1d9',
-    'text.color':       '#c9d1d9',
-    'grid.color':       '#21262d',
+    'figure.facecolor': 'white',
+    'axes.facecolor':   'white',
+    'axes.edgecolor':   '#333333',
+    'axes.labelcolor':  '#1a1a1a',
+    'xtick.color':      '#1a1a1a',
+    'ytick.color':      '#1a1a1a',
+    'text.color':       '#1a1a1a',
+    'grid.color':       '#dddddd',
     'font.family':      'DejaVu Sans',
 })
 
@@ -330,7 +330,7 @@ def train_dl_models(X_train: np.ndarray, X_test: np.ndarray,
 # 5. VISUALISATIONS
 # ─────────────────────────────────────────────────────────────
 
-PALETTE = ['#58a6ff', '#3fb950', '#f78166', '#d2a8ff', '#ffa657', '#79c0ff']
+PALETTE = ['#1f77b4', '#2ca02c', '#d62728', '#9467bd', '#ff7f0e', '#17becf']
 
 
 def _save_confusion_matrix(y_true, y_pred, model_name: str):
@@ -341,8 +341,8 @@ def _save_confusion_matrix(y_true, y_pred, model_name: str):
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
                 xticklabels=['Non-amyloid', 'Amyloid'],
                 yticklabels=['Non-amyloid', 'Amyloid'],
-                ax=ax, cbar=False,
-                annot_kws={'size': 14, 'color': 'white'})
+                ax=ax, cbar=False, linecolor='#333333', linewidths=0.6,
+                annot_kws={'size': 14, 'color': 'black', 'weight': 'bold'})
     ax.set_title(f'Confusion Matrix — {model_name}', fontsize=13, pad=10)
     ax.set_xlabel('Predicted', fontsize=11)
     ax.set_ylabel('Actual',    fontsize=11)
@@ -364,8 +364,8 @@ def _save_training_history(history, model_name: str):
         [('accuracy', 'val_accuracy'), ('loss', 'val_loss')],
         ['Accuracy', 'Loss']
     ):
-        ax.plot(history.history[metric[0]],  color='#58a6ff', label='Train', linewidth=2)
-        ax.plot(history.history[metric[1]], color='#f78166', label='Val',   linewidth=2, linestyle='--')
+        ax.plot(history.history[metric[0]],  color='#1f77b4', label='Train', linewidth=2)
+        ax.plot(history.history[metric[1]], color='#d62728', label='Val',   linewidth=2, linestyle='--')
         ax.set_title(f'{model_name} — {title}', fontsize=12)
         ax.set_xlabel('Epoch')
         ax.set_ylabel(title)
