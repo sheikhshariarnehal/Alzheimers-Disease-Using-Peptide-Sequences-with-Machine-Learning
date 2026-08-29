@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alzheimer's Peptide Risk Predictor | DIU Defience</title>
+  <meta name="description" content="AI-powered early detection of Alzheimer's disease risk from peptide sequences using ML and DL models." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ──────────────────────── RESET & TOKENS ──────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --blue:      #58a6ff;
+      --green:     #3fb950;
+      --orange:    #ffa657;
+      --red:       #f85149;
+      --purple:    #d2a8ff;
+      --glow-blue: rgba(88,166,255,.25);
+      --glow-red:  rgba(248,81,73,.25);
+      --glow-green:rgba(63,185,80,.25);
+      --radius:    14px;
+      --transition: .25s cubic-bezier(.4,0,.2,1);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ──────────────────────── BACKGROUND PARTICLES ──────────────────────── */
+    #canvas-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      opacity: .35;
+    }
+
+    /* ──────────────────────── LAYOUT ──────────────────────── */
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem 4rem;
+      gap: 2rem;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* ──────────────────────── HEADER ──────────────────────── */
+    header {
+      text-align: center;
+      padding: 1.5rem 0 .5rem;
+      animation: fadeDown .7s ease both;
+    }
+
+    .dna-icon {
+      font-size: 3.5rem;
+      display: block;
+      animation: spin 8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    header h1 {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--blue) 0%, var(--purple) 60%, var(--green) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin: .5rem 0 .3rem;
+      line-height: 1.2;
+    }
+
+    header p {
+      color: var(--muted);
+      font-size: .95rem;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .badge {
+      display: inline-block;
+      background: linear-gradient(90deg, var(--blue), var(--purple));
+      color: #fff;
+      font-size: .72rem;
+      font-weight: 600;
+      letter-spacing: .06em;
+      padding: .18rem .65rem;
+      border-radius: 99px;
+      margin-top: .5rem;
+    }
+
+    /* ──────────────────────── CARD ──────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 2rem;
+      width: 100%;
+      transition: box-shadow var(--transition);
+      animation: fadeUp .6s ease both;
+    }
+
+    .card:hover { box-shadow: 0 0 32px rgba(88,166,255,.08); }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--blue);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 1.2rem;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+
+    /* ──────────────────────── FORM ──────────────────────── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 1rem;
+      align-items: end;
+    }
+
+    @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
+
+    label {
+      display: block;
+      font-size: .82rem;
+      font-weight: 500;
+      color: var(--muted);
+      margin-bottom: .4rem;
+    }
+
+    input[type="text"], select {
+      width: 100%;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1rem;
+      padding: .7rem 1rem;
+      transition: border-color var(--transition), box-shadow var(--transition);
+      outline: none;
+    }
+
+    input[type="text"]:focus, select:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px var(--glow-blue);
+    }
+
+    input[type="text"] { text-transform: uppercase; letter-spacing: .12em; }
+
+    select { font-family: 'Inter', sans-serif; cursor: pointer; }
+    select option { background: var(--surface); }
+
+    .quick-seqs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .4rem;
+      margin-top: .55rem;
+    }
+
+    .quick-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .78rem;
+      padding: .2rem .6rem;
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition), border-color var(--transition);
+    }
+
+    .quick-btn:hover {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #fff;
+    }
+
+    /* ──────────────────────── PREDICT BUTTON ──────────────────────── */
+    #predict-btn {
+      background: linear-gradient(135deg, var(--blue), var(--purple));
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: .03em;
+      padding: .75rem 2rem;
+      white-space: nowrap;
+      position: relative;
+      overflow: hidden;
+      transition: transform var(--transition), box-shadow var(--transition);
+    }
+
+    #predict-btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,.15);
+      opacity: 0;
+      transition: opacity var(--transition);
+    }
+
+    #predict-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 24px var(--glow-blue); }
+    #predict-btn:hover::after { opacity: 1; }
+    #predict-btn:active { transform: translateY(0); }
+    #predict-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    .spinner {
+      display: none;
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: rotate .7s linear infinite;
+      margin: 0 auto;
+    }
+
+    @keyframes rotate { to { transform: rotate(360deg); } }
+
+    /* ──────────────────────── RESULT PANEL ──────────────────────── */
+    #result-card {
+      display: none;
+      animation: fadeUp .5s ease both;
+    }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: .8rem;
+      margin-bottom: 1.4rem;
+    }
+
+    .seq-display {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.2rem;
+      font-weight: 600;
+      letter-spacing: .12em;
+      color: var(--blue);
+    }
+
+    .risk-badge {
+      font-size: .9rem;
+      font-weight: 700;
+      padding: .3rem 1rem;
+      border-radius: 99px;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+    }
+
+    .risk-badge.High   { background: rgba(248,81,73,.18);  color: var(--red);    border: 1px solid var(--red);    box-shadow: 0 0 12px var(--glow-red);   }
+    .risk-badge.Medium { background: rgba(255,166,87,.18); color: var(--orange); border: 1px solid var(--orange); }
+    .risk-badge.Low    { background: rgba(63,185,80,.18);  color: var(--green);  border: 1px solid var(--green);  box-shadow: 0 0 12px var(--glow-green); }
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 1.4rem;
+    }
+
+    @media (max-width: 480px) { .result-grid { grid-template-columns: 1fr; } }
+
+    .stat-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.2rem;
+    }
+
+    .stat-label { font-size: .75rem; color: var(--muted); margin-bottom: .25rem; text-transform: uppercase; letter-spacing: .06em; }
+    .stat-value { font-size: 1.3rem; font-weight: 700; }
+
+    /* Probability bar */
+    .prob-section { margin-bottom: .2rem; }
+
+    .prob-label-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: .8rem;
+      color: var(--muted);
+      margin-bottom: .4rem;
+    }
+
+    .prob-track {
+      background: var(--bg);
+      border-radius: 99px;
+      height: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    #prob-fill {
+      height: 100%;
+      border-radius: 99px;
+      width: 0%;
+      transition: width 1s cubic-bezier(.4,0,.2,1), background 1s;
+    }
+
+    /* Molecule animation on result */
+    .helix {
+      text-align: center;
+      font-size: 2.5rem;
+      margin-bottom: .5rem;
+      animation: pulse 2s ease infinite;
+    }
+
+    @keyframes pulse { 0%,100%{transform:scale(1)}50%{transform:scale(1.08)} }
+
+    /* ──────────────────────── INFO CARDS ──────────────────────── */
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      animation: fadeUp .8s ease both;
+    }
+
+    .info-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.3rem;
+      text-align: center;
+      transition: transform var(--transition), box-shadow var(--transition);
+    }
+
+    .info-card:hover { transform: translateY(-4px); box-shadow: 0 8px 24px rgba(88,166,255,.1); }
+    .info-card .icon { font-size: 2rem; margin-bottom: .5rem; }
+    .info-card .num  { font-size: 1.8rem; font-weight: 800; color: var(--blue); }
+    .info-card .desc { font-size: .8rem; color: var(--muted); margin-top: .2rem; }
+
+    /* ──────────────────────── ERROR ──────────────────────── */
+    #error-msg {
+      display: none;
+      background: rgba(248,81,73,.12);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      color: var(--red);
+      font-size: .88rem;
+      padding: .6rem 1rem;
+      margin-top: .8rem;
+    }
+
+    /* ──────────────────────── FOOTER ──────────────────────── */
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: .78rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      width: 100%;
+    }
+
+    /* ──────────────────────── ANIMATIONS ──────────────────────── */
+    @keyframes fadeDown { from{opacity:0;transform:translateY(-18px)} to{opacity:1;transform:none} }
+    @keyframes fadeUp   { from{opacity:0;transform:translateY(18px)}  to{opacity:1;transform:none} }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas-bg"></canvas>
+
+<div class="wrapper">
+
+  <!-- HEADER -->
+  <header>
+    <span class="dna-icon">🧬</span>
+    <h1>Alzheimer's Peptide Risk Predictor</h1>
+    <p>Enter any peptide sequence to predict its amyloid tendency — an early-stage Alzheimer's risk signal — using trained ML & DL models.</p>
+    <span class="badge">DIU Final Defence Project</span>
+  </header>
+
+  <!-- STATS ROW -->
+  <div class="info-grid">
+    <div class="info-card">
+      <div class="icon">🤖</div>
+      <div class="num">6</div>
+      <div class="desc">Trained Models</div>
+    </div>
+    <div class="info-card">
+      <div class="icon">🧪</div>
+      <div class="num">1,800+</div>
+      <div class="desc">Peptide Sequences</div>
+    </div>
+    <div class="info-card">
+      <div class="icon">🏆</div>
+      <div class="num">{{ best_model }}</div>
+      <div class="desc">Best Model</div>
+    </div>
+    <div class="info-card">
+      <div class="icon">📊</div>
+      <div class="num">5-Fold</div>
+      <div class="desc">Cross-Validation</div>
+    </div>
+  </div>
+
+  <!-- INPUT CARD -->
+  <div class="card">
+    <div class="card-title">⚗️ &nbsp;Predict Alzheimer Risk</div>
+
+    <div class="form-grid">
+      <div>
+        <label for="sequence-input">Peptide Sequence (Single-letter amino acid codes)</label>
+        <input id="sequence-input" type="text" placeholder="e.g. KLVFFA" maxlength="200"
+               autocomplete="off" spellcheck="false" />
+        <div class="quick-seqs">
+          <span style="font-size:.75rem;color:var(--muted);align-self:center;">Try:</span>
+          <button class="quick-btn" data-seq="KLVFFA">KLVFFA</button>
+          <button class="quick-btn" data-seq="GVVIA">GVVIA</button>
+          <button class="quick-btn" data-seq="AAAQAA">AAAQAA</button>
+          <button class="quick-btn" data-seq="FGAIL">FGAIL</button>
+          <button class="quick-btn" data-seq="MVGGVVIA">MVGGVVIA</button>
+        </div>
+      </div>
+
+      <div>
+        <label for="model-select">Model</label>
+        <select id="model-select">
+          <option value="CNN">CNN</option>
+          <option value="BiLSTM">BiLSTM</option>
+          <option value="LSTM">LSTM</option>
+          <option value="Random Forest">Random Forest</option>
+          <option value="Logistic Regression">Logistic Regression</option>
+          <option value="SVM">SVM</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="error-msg"></div>
+
+    <div style="margin-top:1.2rem;display:flex;justify-content:flex-end;">
+      <button id="predict-btn" onclick="runPrediction()">
+        <span id="btn-text">🔬 Predict Risk</span>
+        <div class="spinner" id="spinner"></div>
+      </button>
+    </div>
+  </div>
+
+  <!-- RESULT CARD -->
+  <div class="card" id="result-card">
+    <div class="card-title">📋 &nbsp;Prediction Result</div>
+
+    <div class="helix" id="result-icon">🧬</div>
+
+    <div class="result-header">
+      <span class="seq-display" id="res-seq"></span>
+      <span class="risk-badge" id="res-risk"></span>
+    </div>
+
+    <div class="result-grid">
+      <div class="stat-box">
+        <div class="stat-label">Classification</div>
+        <div class="stat-value" id="res-pred" style="font-size:1.05rem;"></div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Model Used</div>
+        <div class="stat-value" id="res-model" style="font-size:1.05rem;color:var(--purple);"></div>
+      </div>
+    </div>
+
+    <div class="prob-section">
+      <div class="prob-label-row">
+        <span>Amyloid Probability</span>
+        <span id="res-prob-pct"></span>
+      </div>
+      <div class="prob-track">
+        <div id="prob-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    Alzheimer's Early Detection via Peptide Sequences &nbsp;|&nbsp;
+    Daffodil International University &nbsp;|&nbsp;
+    ML &amp; DL Pipeline: LR · RF · SVM · CNN · LSTM · BiLSTM
+  </footer>
+
+</div>
+
+<!-- ─────────────────────── SCRIPTS ─────────────────────── -->
+<script>
+  /* ── Canvas particle background ── */
+  (function() {
+    const canvas = document.getElementById('canvas-bg');
+    const ctx    = canvas.getContext('2d');
+    let W, H, particles;
+
+    function resize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+    }
+
+    function initParticles() {
+      particles = Array.from({length: 60}, () => ({
+        x:  Math.random() * W,
+        y:  Math.random() * H,
+        r:  Math.random() * 1.8 + .4,
+        dx: (Math.random() - .5) * .4,
+        dy: (Math.random() - .5) * .4,
+        a:  Math.random(),
+      }));
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      particles.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(88,166,255,${p.a})`;
+        ctx.fill();
+        p.x += p.dx; p.y += p.dy;
+        if (p.x < 0 || p.x > W) p.dx *= -1;
+        if (p.y < 0 || p.y > H) p.dy *= -1;
+      });
+
+      // Draw faint lines between close particles
+      for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+          const dx = particles[i].x - particles[j].x;
+          const dy = particles[i].y - particles[j].y;
+          const dist = Math.sqrt(dx*dx + dy*dy);
+          if (dist < 100) {
+            ctx.beginPath();
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.strokeStyle = `rgba(88,166,255,${.12 * (1 - dist/100)})`;
+            ctx.lineWidth = .6;
+            ctx.stroke();
+          }
+        }
+      }
+      requestAnimationFrame(draw);
+    }
+
+    window.addEventListener('resize', () => { resize(); initParticles(); });
+    resize(); initParticles(); draw();
+  })();
+
+  /* ── Quick-sequence buttons ── */
+  document.querySelectorAll('.quick-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('sequence-input').value = btn.dataset.seq;
+    });
+  });
+
+  /* ── Enter key ── */
+  document.getElementById('sequence-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runPrediction();
+  });
+
+  /* ── Auto-uppercase input ── */
+  document.getElementById('sequence-input').addEventListener('input', function() {
+    const pos = this.selectionStart;
+    this.value = this.value.toUpperCase();
+    this.setSelectionRange(pos, pos);
+  });
+
+  /* ── Prediction ── */
+  async function runPrediction() {
+    const seqEl   = document.getElementById('sequence-input');
+    const modelEl = document.getElementById('model-select');
+    const errEl   = document.getElementById('error-msg');
+    const btn     = document.getElementById('predict-btn');
+    const spinner = document.getElementById('spinner');
+    const btnText = document.getElementById('btn-text');
+
+    errEl.style.display = 'none';
+    const sequence = seqEl.value.trim().toUpperCase();
+    if (!sequence) {
+      showError('Please enter a peptide sequence.');
+      return;
+    }
+
+    // Loading state
+    btn.disabled  = true;
+    btnText.style.display = 'none';
+    spinner.style.display = 'block';
+
+    try {
+      const res  = await fetch('/predict', {
+        method:  'POST',
+        headers: {'Content-Type': 'application/json'},
+        body:    JSON.stringify({ sequence, model: modelEl.value }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) { showError(data.error || 'Prediction failed.'); return; }
+      renderResult(data);
+    } catch (e) {
+      showError('Could not reach the server. Is it running?');
+    } finally {
+      btn.disabled  = false;
+      btnText.style.display = '';
+      spinner.style.display = 'none';
+    }
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-msg');
+    el.textContent    = '⚠️  ' + msg;
+    el.style.display  = 'block';
+  }
+
+  function renderResult(data) {
+    const card = document.getElementById('result-card');
+
+    document.getElementById('res-seq').textContent   = data.sequence;
+    document.getElementById('res-pred').textContent  = data.prediction;
+    document.getElementById('res-model').textContent = data.model;
+    document.getElementById('res-prob-pct').textContent = data.probability.toFixed(1) + '%';
+
+    const riskEl = document.getElementById('res-risk');
+    riskEl.textContent  = data.risk_level + ' Risk';
+    riskEl.className    = 'risk-badge ' + data.risk_level;
+
+    const icon = document.getElementById('result-icon');
+    icon.textContent = data.risk_level === 'High'   ? '⚠️' :
+                       data.risk_level === 'Medium'  ? '🔬' : '✅';
+
+    // Probability bar
+    const fill = document.getElementById('prob-fill');
+    fill.style.width = '0%';
+    const pct   = data.probability;
+    const color = pct > 70 ? 'var(--red)' :
+                  pct > 50 ? 'var(--orange)' : 'var(--green)';
+    fill.style.background = color;
+
+    card.style.display = 'block';
+    card.style.animation = 'none';
+    card.offsetHeight; // reflow
+    card.style.animation = 'fadeUp .5s ease both';
+
+    setTimeout(() => { fill.style.width = pct + '%'; }, 100);
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+</script>
+</body>
+</html>
