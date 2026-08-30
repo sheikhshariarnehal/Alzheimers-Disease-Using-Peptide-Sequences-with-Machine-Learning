@@ -8,3 +8,6 @@ __pycache__/
 ~$*.docx
 draft_report_wip.docx
 *UPDATED.docx
+scratch/
+dumped_paragraphs.txt
+report_figures/test_dfd.png

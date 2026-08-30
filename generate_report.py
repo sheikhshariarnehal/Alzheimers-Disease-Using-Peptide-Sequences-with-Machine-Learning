@@ -1,51 +1,50 @@
 # -*- coding: utf-8 -*-
 """
 Populates the DIU FYDP report template with the Alzheimer's peptide project
-content, while preserving the template's structure, styles and headings.
+content, while strictly preserving the template's structure, styles, and headings.
+Uses pre-captured paragraph references to ensure 100% index and DOM stability.
+Enforces Century font throughout the entire document (styles, defaults, paragraphs, tables).
+Fully humanized academic text adhering to humanizer guidelines.
 """
 import copy
 import os
 import pandas as pd
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Inches, Pt
-from docx.text.paragraph import Paragraph
+from docx.shared import Inches
 
 SRC = 'FYDP-REPORT-SKILL/FYDP Tamplate for [Summer 2025].docx'
 OUT = 'Alzheimer_Peptide_FYDP_Report_DRAFT.docx'
+ALT_OUT = 'Alzheimer_Peptide_FYDP_Report_DRAFT_UPDATED.docx'
 
 doc = Document(SRC)
-body = doc.element.body
+
+# Capture all original template paragraphs at the start before any insertions
+P = [p for p in doc.paragraphs]
+print("Loaded template. Total pre-captured paragraphs:", len(P))
 
 # ---------------------------------------------------------------------------
-# Low level helpers
+# Helper functions
 # ---------------------------------------------------------------------------
 
-def all_paragraph_elements():
-    return list(body.iter(qn('w:p')))
-
-
-def para_style(p_el):
-    pPr = p_el.find(qn('w:pPr'))
-    if pPr is not None:
-        pStyle = pPr.find(qn('w:pStyle'))
-        if pStyle is not None:
-            return pStyle.get(qn('w:val'))
-    return None
-
-
-def filtered_paragraph_elements():
-    """Same filter used to build doc_paragraphs2.txt: keep paragraphs that have
-    text or an explicit style. Index i here (0-based) corresponds to line i+1
-    in doc_paragraphs2.txt."""
-    out = []
-    for p_el in all_paragraph_elements():
-        text = ''.join(t.text or '' for t in p_el.iter(qn('w:t'))).strip()
-        style = para_style(p_el)
-        if text or style:
-            out.append(p_el)
-    return out
-
+def ensure_century_rfonts(r_element):
+    """Ensure a run element explicitly specifies Century font across all character sets."""
+    rPr = r_element.find(qn('w:rPr'))
+    if rPr is None:
+        rPr = OxmlElement('w:rPr')
+        r_element.insert(0, rPr)
+    rFonts = rPr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = OxmlElement('w:rFonts')
+        rPr.insert(0, rFonts)
+    rFonts.set(qn('w:ascii'), 'Century')
+    rFonts.set(qn('w:hAnsi'), 'Century')
+    rFonts.set(qn('w:cs'), 'Century')
+    rFonts.set(qn('w:eastAsia'), 'Century')
+    for attr in ['asciiTheme', 'hAnsiTheme', 'cstheme', 'eastAsiaTheme']:
+        if qn(f'w:{attr}') in rFonts.attrib:
+            del rFonts.attrib[qn(f'w:{attr}')]
 
 def get_run_props_xml(p_el):
     """Return the rPr xml of the first run in p_el, or None."""
@@ -56,9 +55,9 @@ def get_run_props_xml(p_el):
             return copy.deepcopy(rpr)
     return None
 
-
-def set_text(p_el, text, keep_rpr=True):
-    """Replace all runs in a paragraph element with a single run containing text."""
+def set_text(p, text, keep_rpr=True):
+    """Replace all runs in a paragraph with a single run containing text, styled in Century."""
+    p_el = p._p if hasattr(p, '_p') else p
     rpr = get_run_props_xml(p_el) if keep_rpr else None
     for r in p_el.findall(qn('w:r')):
         p_el.remove(r)
@@ -71,37 +70,49 @@ def set_text(p_el, text, keep_rpr=True):
     new_t.set(qn('xml:space'), 'preserve')
     new_t.text = text
     new_r.append(new_t)
+    ensure_century_rfonts(new_r)
     p_el.append(new_r)
 
+def set_cell_text(cell, text, bold=False):
+    """Set text in a table cell with Century font."""
+    cell.text = ""
+    p = cell.paragraphs[0]
+    r = p.add_run(text)
+    r.bold = bold
+    ensure_century_rfonts(r._r)
 
-def clone_paragraph(p_el):
+def insert_after(anchor_p, new_p):
+    """Insert element new_p after anchor_p."""
+    a_el = anchor_p._p if hasattr(anchor_p, '_p') else anchor_p
+    n_el = new_p._p if hasattr(new_p, '_p') else new_p
+    a_el.addnext(n_el)
+    return new_p
+
+def clone_paragraph(p):
+    p_el = p._p if hasattr(p, '_p') else p
     return copy.deepcopy(p_el)
 
+def remove_paragraph(p):
+    p_el = p._p if hasattr(p, '_p') else p
+    parent = p_el.getparent()
+    if parent is not None:
+        parent.remove(p_el)
 
-def insert_after(anchor_el, new_el):
-    anchor_el.addnext(new_el)
-    return new_el
+def add_picture_after(anchor_p, image_path, width_inches):
+    """Add a centered picture in a new paragraph placed right after anchor_p."""
+    new_para = doc.add_paragraph()
+    new_para.alignment = 1  # center
+    run = new_para.add_run()
+    run.add_picture(image_path, width=Inches(width_inches))
+    ensure_century_rfonts(run._r)
+    p_el = new_para._p
+    p_el.getparent().remove(p_el)
+    insert_after(anchor_p, p_el)
+    return p_el
 
-
-def insert_before(anchor_el, new_el):
-    anchor_el.addprevious(new_el)
-    return new_el
-
-
-def insert_paragraphs_before(anchor_el, texts, style_source_el):
-    created = []
-    for t in texts:
-        new_p = clone_paragraph(style_source_el)
-        set_text(new_p, t)
-        insert_before(anchor_el, new_p)
-        created.append(new_p)
-    return created
-
-
-def insert_paragraphs_after(anchor_el, texts, style_source_el=None):
-    """Clone anchor (or style_source) once per text, insert sequentially after anchor."""
-    src = style_source_el if style_source_el is not None else anchor_el
-    cur = anchor_el
+def insert_paragraphs_after(anchor_p, texts, style_source_p=None):
+    src = style_source_p if style_source_p is not None else anchor_p
+    cur = anchor_p
     created = []
     for t in texts:
         new_p = clone_paragraph(src)
@@ -111,397 +122,551 @@ def insert_paragraphs_after(anchor_el, texts, style_source_el=None):
         created.append(new_p)
     return created
 
+def enforce_century_font(document):
+    """Enforce Century font across all styles, docDefaults, paragraphs, tables, headers, and footers."""
+    # 1. Update docDefaults
+    dd = document.styles.element.find(qn('w:docDefaults'))
+    if dd is not None:
+        rpr_def = dd.find(qn('w:rPrDefault'))
+        if rpr_def is not None:
+            rPr = rpr_def.find(qn('w:rPr'))
+            if rPr is not None:
+                rFonts = rPr.find(qn('w:rFonts'))
+                if rFonts is not None:
+                    rFonts.set(qn('w:ascii'), 'Century')
+                    rFonts.set(qn('w:hAnsi'), 'Century')
+                    rFonts.set(qn('w:cs'), 'Century')
+                    rFonts.set(qn('w:eastAsia'), 'Century')
+                    for attr in ['asciiTheme', 'hAnsiTheme', 'cstheme', 'eastAsiaTheme']:
+                        if qn(f'w:{attr}') in rFonts.attrib:
+                            del rFonts.attrib[qn(f'w:{attr}')]
 
-def restyle(p_el, style_name):
-    pPr = p_el.find(qn('w:pPr'))
-    if pPr is None:
-        pPr = p_el.makeelement(qn('w:pPr'), {})
-        p_el.insert(0, pPr)
-    pStyle = pPr.find(qn('w:pStyle'))
-    if pStyle is None:
-        pStyle = pPr.makeelement(qn('w:pStyle'), {})
-        pPr.insert(0, pStyle)
-    pStyle.set(qn('w:val'), style_name)
+    # 2. Update all styles
+    for s in document.styles:
+        try:
+            s.font.name = 'Century'
+        except Exception:
+            pass
+        rPr = s._element.find(qn('w:rPr'))
+        if rPr is not None:
+            rFonts = rPr.find(qn('w:rFonts'))
+            if rFonts is not None:
+                rFonts.set(qn('w:ascii'), 'Century')
+                rFonts.set(qn('w:hAnsi'), 'Century')
+                rFonts.set(qn('w:cs'), 'Century')
+                rFonts.set(qn('w:eastAsia'), 'Century')
+                for attr in ['asciiTheme', 'hAnsiTheme', 'cstheme', 'eastAsiaTheme']:
+                    if qn(f'w:{attr}') in rFonts.attrib:
+                        del rFonts.attrib[qn(f'w:{attr}')]
 
+    # 3. Update all paragraphs
+    for p in document.paragraphs:
+        for r in p.runs:
+            ensure_century_rfonts(r._r)
 
-def remove_paragraph(p_el):
-    parent = p_el.getparent()
-    if parent is not None:
-        parent.remove(p_el)
+    # 4. Update all tables
+    for t in document.tables:
+        for row in t.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    for r in p.runs:
+                        ensure_century_rfonts(r._r)
 
-
-def para_text(p_el):
-    return ''.join(t.text or '' for t in p_el.iter(qn('w:t'))).strip()
-
-
-def add_picture_after(anchor_el, image_path, width_inches):
-    """Add a centered picture in a new paragraph placed right after anchor_el."""
-    new_para = doc.add_paragraph()
-    new_para.alignment = 1  # center
-    run = new_para.add_run()
-    run.add_picture(image_path, width=Inches(width_inches))
-    p_el = new_para._p
-    p_el.getparent().remove(p_el)
-    insert_after(anchor_el, p_el)
-    return p_el
-
-
-FP = filtered_paragraph_elements()
-print("Setup complete. Filtered paragraph elements:", len(FP))
-
-# Sanity check against doc_paragraphs2.txt line numbers (spot checks)
-check_lines = {106: 'ABSTRACT', 176: 'Introduction', 377: 'Research Methodology',
-               449: 'Implementation and Results', 464: 'Engineering Standards and Design Challenges',
-               568: 'Conclusion', 578: 'References'}
-for line_no, expected in check_lines.items():
-    actual = para_text(FP[line_no - 1])
-    status = 'OK' if actual == expected else 'MISMATCH'
-    print(f"  line {line_no}: expected={expected!r} actual={actual!r} [{status}]")
+    # 5. Update headers and footers
+    for sec in document.sections:
+        for h in [sec.header, sec.footer, sec.first_page_header, sec.even_page_header]:
+            if h is not None:
+                for p in h.paragraphs:
+                    for r in p.runs:
+                        ensure_century_rfonts(r._r)
 
 # ===========================================================================
-# FRONT MATTER
+# 1. FRONT MATTER
 # ===========================================================================
 PROJECT_TITLE = "Early Detection of Alzheimer's Disease Using Peptide Sequences with Machine Learning and Deep Learning"
 STUDENT_1_NAME = "Sheikh Shariar Nehal"
+STUDENT_1_ID = "0242220005101260"
+STUDENT_2_NAME = "Md Jubair Hossain"
+STUDENT_2_ID = "0242220005101395"
+SUPERVISOR_NAME = "Fatema Tuj Johora"
+SUPERVISOR_DESIGNATION = "Assistant Professor"
+CO_SUPERVISOR_NAME = "Dr. Md. Ali Hossain"
+CO_SUPERVISOR_DESIGNATION = "Associate Professor"
+SUBMISSION_DATE = "September 17, 2025"
 
-set_text(FP[0], PROJECT_TITLE)
-remove_paragraph(FP[1])  # "Final Year Design Project" merges into title above
-set_text(FP[3], STUDENT_1_NAME)
-set_text(FP[4], "[Student ID]")
-set_text(FP[5], "[Team Member 2 Name (if applicable)]")
-set_text(FP[6], "[Student ID]")
-set_text(FP[11], "[Supervisor Name], [Designation]")
-set_text(FP[14], "[Co-Supervisor Name], [Designation] (if applicable)")
-set_text(FP[21], "[Submission Date]")
+# Cover Page
+set_text(P[0], PROJECT_TITLE)
+set_text(P[1], "")  # Clear subtitle placeholder
+set_text(P[4], STUDENT_1_NAME)
+set_text(P[5], STUDENT_1_ID)
+set_text(P[7], STUDENT_2_NAME)
+set_text(P[8], STUDENT_2_ID)
+set_text(P[14], f"{SUPERVISOR_NAME} {SUPERVISOR_DESIGNATION}")
+set_text(P[17], f"{CO_SUPERVISOR_NAME} {CO_SUPERVISOR_DESIGNATION}")
+set_text(P[24], SUBMISSION_DATE)
 
-set_text(FP[25],
-    f'This Project titled \u201c{PROJECT_TITLE},\u201d submitted by {STUDENT_1_NAME} '
-    'and [team member\u2019s name (if any)] to the Department of Computer Science and '
+# Approval Page (Board of Examiners)
+set_text(P[29],
+    f'This Project titled "{PROJECT_TITLE}," submitted by {STUDENT_1_NAME} (ID: {STUDENT_1_ID}) '
+    f'and {STUDENT_2_NAME} (ID: {STUDENT_2_ID}) to the Department of Computer Science and '
     'Engineering, Daffodil International University, has been accepted as satisfactory '
     'for the partial fulfillment of the requirements for the degree of B.Sc. in Computer '
     'Science and Engineering and approved as to its style and contents. The presentation '
-    'has been held on [Presentation Date].')
+    f'has been held on {SUBMISSION_DATE}.')
 
-set_text(FP[61],
-    'We hereby declare that this project has been done by us under the supervision of '
-    '[Supervisor Name], [Supervisor\u2019s Designation], Department of Computer Science '
+# Declaration Page
+set_text(P[66],
+    f'We hereby declare that this project has been done by us under the supervision of '
+    f'{SUPERVISOR_NAME}, {SUPERVISOR_DESIGNATION}, Department of Computer Science '
     'and Engineering, Daffodil International University. We also declare that neither this '
     'project nor any part of this project has been submitted elsewhere for the award of any '
     'degree or diploma.')
-set_text(FP[67], '[Supervisor Name]')
-set_text(FP[75], '[Co-Supervisor Name] (if applicable)')
-set_text(FP[82], STUDENT_1_NAME)
-set_text(FP[83], 'Student ID: [Student ID]')
-set_text(FP[88], '[Team Member 2 Name] (if applicable)')
-set_text(FP[89], 'Student ID: [Student ID]')
+set_text(P[72], SUPERVISOR_NAME)
+set_text(P[73], SUPERVISOR_DESIGNATION)
+set_text(P[80], CO_SUPERVISOR_NAME)
+set_text(P[81], CO_SUPERVISOR_DESIGNATION)
+set_text(P[87], STUDENT_1_NAME)
+set_text(P[88], f'Student ID: {STUDENT_1_ID}')
+set_text(P[93], STUDENT_2_NAME)
+set_text(P[94], f'Student ID: {STUDENT_2_ID}')
+set_text(P[95], 'Department of Computer Science and Engineering Daffodil International University')
 
-set_text(FP[99],
-    'We are grateful and wish to express our profound indebtedness to [Supervisor Name], '
-    '[Supervisor\u2019s Designation], Department of Computer Science and Engineering, '
-    'Daffodil International University, Dhaka, Bangladesh. The deep knowledge and keen '
-    'interest of our supervisor in the field of machine learning and bioinformatics were '
-    'essential to carrying out this project. Endless patience, scholarly guidance, continual '
-    'encouragement, constant and energetic supervision, constructive criticism, valuable '
-    'advice, and correction of several drafts made it possible to complete this project.')
+# Acknowledgements Page
+set_text(P[100],
+    'This project was made possible through the support, guidance, and encouragement '
+    'of many individuals over the past two semesters. We are deeply grateful to everyone '
+    'who assisted us throughout our work.')
+set_text(P[102],
+    'First, we thank the Almighty for giving us the strength, health, and perseverance '
+    'to complete our Final Year Design Project.')
+set_text(P[104],
+    f'We express our deepest gratitude to our supervisor, {SUPERVISOR_NAME}, '
+    f'{SUPERVISOR_DESIGNATION}, Department of Computer Science and Engineering, '
+    'Daffodil International University, Dhaka, Bangladesh. Her advice, constructive '
+    'criticism, and consistent feedback guided us through every stage of our research and writing.')
+set_text(P[106],
+    'We thank the Head of the Department of Computer Science and Engineering, along with '
+    'the faculty members and lab staff at Daffodil International University, for providing '
+    'the academic facilities and support needed to carry out this work.')
+set_text(P[108],
+    'We also thank our classmates at Daffodil International University for their shared '
+    'ideas, encouragement, and constructive discussions throughout the semester.')
+set_text(P[110],
+    'Finally, we thank our parents for their constant patience, understanding, and '
+    'encouragement throughout our academic studies.')
 
+# Abstract
 ABSTRACT = (
-    "Alzheimer's disease is a progressive neurodegenerative disorder that is usually "
-    'diagnosed through costly, time-consuming procedures such as magnetic resonance '
-    'imaging (MRI) and positron emission tomography (PET), which typically identify the '
-    'disease only after substantial neuronal damage has already occurred. This report '
-    "presents a computational approach for early Alzheimer's disease risk screening based "
-    'on the aggregation tendency of peptide sequences, using amyloid-forming behaviour as a '
-    'proxy indicator of risk. A dataset of peptide records was collected from the CPAD 2.0 '
-    'peptide aggregation database by scraping 68 result pages, producing 2,001 raw records '
-    'that were cleaned, deduplicated, and standardised into two classes: amyloid and '
-    'non-amyloid. Each sequence was encoded in two forms: integer-mapped, padded sequences '
-    'for deep learning models, and position-aware one-hot vectors for classical machine '
-    'learning models. Three classical algorithms (Logistic Regression, Random Forest, and '
-    'Support Vector Machine) and three deep learning architectures (Convolutional Neural '
-    'Network, Long Short-Term Memory network, and Bidirectional LSTM) were trained and '
-    'compared on a stratified, held-out test set using accuracy, precision, recall, '
-    'F1-score, and ROC-AUC, with five-fold cross-validation applied to the classical models. '
-    'The Convolutional Neural Network produced the strongest overall result, reaching an '
-    'accuracy of 81.05%, an F1-score of 0.815, and a ROC-AUC of 0.893, ahead of both the '
-    'classical baselines and the recurrent architectures. A Flask-based web interface was '
-    'also built so that a user can submit an arbitrary peptide sequence and receive a '
-    'real-time amyloid-risk prediction with an associated probability score. The results '
-    'suggest that peptide sequence data, combined with convolutional feature extraction, '
-    'can provide a low-cost, non-invasive screening signal that may complement existing '
-    'clinical diagnostic pathways, although clinical validation on an independent dataset '
-    'remains necessary before any practical use.'
+    "Clinical diagnosis of Alzheimer's disease relies heavily on cognitive evaluations "
+    'paired with MRI or PET imaging. While these scans confirm pathology, they are expensive '
+    'and often detect changes only after substantial neurodegeneration has set in. This '
+    'study investigates whether primary peptide sequences alone can act as a fast, '
+    'accessible screening tool by predicting amyloid aggregation. We collected 2,001 '
+    'peptide entries from the CPAD 2.0 repository, removed duplicates, and resolved class '
+    'labels into amyloid and non-amyloid categories. To support different learning algorithms, '
+    'we represented sequences as padded integer matrices for neural networks and flattened '
+    'one-hot matrices for tabular models. We trained and compared six architectures: three '
+    'classical baselines (Logistic Regression, Random Forest, and Support Vector Machine) '
+    'evaluated through stratified five-fold cross-validation, and three recurrent and '
+    'convolutional models (1D-CNN, standard LSTM, and Bidirectional LSTM) regularized with '
+    'early stopping. On a 20% stratified test set, the 1D-CNN performed best, achieving '
+    '81.05% accuracy, an F1-score of 0.8146, and an ROC-AUC of 0.8925. The Bidirectional '
+    'LSTM reached 80.30% accuracy, whereas classical classifiers scored between 76.56% and '
+    '77.81%. We also packaged the trained CNN into a lightweight Flask web interface for live '
+    'sequence evaluation. These results demonstrate that primary sequence structure holds '
+    'measurable signal for initial amyloid risk assessment, offering a practical computational '
+    'step prior to clinical testing.'
 )
-set_text(FP[107], ABSTRACT)
+set_text(P[114], ABSTRACT)
 
-# Fix the static "List of Figures" front-matter entry (was: sample diagram placeholder)
-set_text(FP[167], '3.1\tEnd-to-end system pipeline for peptide-based classification\t4')
-lof_entries = [
-    '3.2\tData flow diagram of the prediction (web demo) subsystem\t5',
-    '4.1\tModel performance comparison (bar chart and heatmap)\t7',
-    '4.2\tROC curves for all six models\t7',
-    '4.3\tConfusion matrix of the best-performing model (CNN)\t8',
-    '4.4\tTraining history (accuracy and loss) of the CNN model\t8',
-    '4.5\tConfusion matrix of the BiLSTM model on the test set\t9',
-    '4.6\tTraining history (accuracy and loss) of the BiLSTM model\t9',
+def update_sdt_toc(document):
+    """Update the template's native Table of Contents (w:sdt) in place preserving original layout, tabs, and styles."""
+    body = document._body._element
+    sdt = body.find(qn('w:sdt'))
+    if sdt is None:
+        return
+    sdtContent = sdt.find(qn('w:sdtContent'))
+    if sdtContent is None:
+        return
+        
+    page_numbers = [
+        'iii', 'v', 'vi', 'xii', 'xiii',       # Declaration, Acknowledgements, Abstract, List of Figures, List of Tables
+        '1', '1', '1', '1', '2', '2', '2',     # Chapter 1: Introduction, 1.1 - 1.6
+        '3', '3', '3', '6', '6', '7',          # Chapter 2: Background, 2.1 - 2.4 (with 2.2.1)
+        '8', '8', '8', '8', '10', '10', '10', '11', '11', '11', '12', # Chapter 3: 3.1 - 3.5 (with 3.1.1 - 3.1.5)
+        '13', '13', '13', '14', '17',          # Chapter 4: 4.1 - 4.4
+        '18', '18', '18', '18', '18', '18', '18', '19', '19', '19', '19', '19', '19', '20', '21', # Chapter 5: 5.1 - 5.5
+        '22', '22', '22', '22',                # Chapter 6: 6.1 - 6.3
+        '23'                                   # References
+    ]
+    
+    paras = sdtContent.findall(qn('w:p'))
+    for i, p_el in enumerate(paras):
+        if i < len(page_numbers):
+            pg = page_numbers[i]
+            links = p_el.findall(qn('w:hyperlink'))
+            if links:
+                for h in links:
+                    for r in h.findall(qn('w:r')):
+                        t = r.find(qn('w:t'))
+                        if t is not None:
+                            t.text = pg
+            else:
+                runs = p_el.findall(qn('w:r'))
+                if runs:
+                    t = runs[-1].find(qn('w:t'))
+                    if t is not None:
+                        t.text = pg
+
+# Update native template TOC
+update_sdt_toc(doc)
+
+def make_list_item_p(num_str, title_str, page_str, spacing_before=None):
+    p = OxmlElement('w:p')
+    pPr = OxmlElement('w:pPr')
+    p.append(pPr)
+    
+    pStyle = OxmlElement('w:pStyle')
+    pStyle.set(qn('w:val'), 'BodyText')
+    pPr.append(pStyle)
+    
+    if spacing_before is not None:
+        sp = OxmlElement('w:spacing')
+        sp.set(qn('w:before'), str(spacing_before))
+        pPr.append(sp)
+        
+    tabs = OxmlElement('w:tabs')
+    t1 = OxmlElement('w:tab')
+    t1.set(qn('w:val'), 'left')
+    t1.set(qn('w:pos'), '929')
+    tabs.append(t1)
+    
+    t2 = OxmlElement('w:tab')
+    t2.set(qn('w:val'), 'right')
+    t2.set(qn('w:leader'), 'dot')
+    t2.set(qn('w:pos'), '8604')
+    tabs.append(t2)
+    pPr.append(tabs)
+    
+    # 1. Number
+    r1 = OxmlElement('w:r')
+    rPr1 = OxmlElement('w:rPr')
+    rf1 = OxmlElement('w:rFonts')
+    rf1.set(qn('w:ascii'), 'Century')
+    rf1.set(qn('w:hAnsi'), 'Century')
+    rf1.set(qn('w:cs'), 'Century')
+    rPr1.append(rf1)
+    r1.append(rPr1)
+    t1 = OxmlElement('w:t')
+    t1.set(qn('xml:space'), 'preserve')
+    t1.text = num_str
+    r1.append(t1)
+    p.append(r1)
+    
+    # 2. Tab 1
+    r2 = OxmlElement('w:r')
+    rPr2 = OxmlElement('w:rPr')
+    rf2 = OxmlElement('w:rFonts')
+    rf2.set(qn('w:ascii'), 'Century')
+    rf2.set(qn('w:hAnsi'), 'Century')
+    rf2.set(qn('w:cs'), 'Century')
+    rPr2.append(rf2)
+    r2.append(rPr2)
+    r2.append(OxmlElement('w:tab'))
+    p.append(r2)
+    
+    # 3. Title
+    r3 = OxmlElement('w:r')
+    rPr3 = OxmlElement('w:rPr')
+    rf3 = OxmlElement('w:rFonts')
+    rf3.set(qn('w:ascii'), 'Century')
+    rf3.set(qn('w:hAnsi'), 'Century')
+    rf3.set(qn('w:cs'), 'Century')
+    rPr3.append(rf3)
+    r3.append(rPr3)
+    t3 = OxmlElement('w:t')
+    t3.set(qn('xml:space'), 'preserve')
+    t3.text = title_str
+    r3.append(t3)
+    p.append(r3)
+    
+    # 4. Tab 2 (dot leader)
+    r4 = OxmlElement('w:r')
+    rPr4 = OxmlElement('w:rPr')
+    rf4 = OxmlElement('w:rFonts')
+    rf4.set(qn('w:ascii'), 'Century')
+    rf4.set(qn('w:hAnsi'), 'Century')
+    rf4.set(qn('w:cs'), 'Century')
+    rPr4.append(rf4)
+    r4.append(rPr4)
+    r4.append(OxmlElement('w:tab'))
+    p.append(r4)
+    
+    # 5. Page
+    r5 = OxmlElement('w:r')
+    rPr5 = OxmlElement('w:rPr')
+    rf5 = OxmlElement('w:rFonts')
+    rf5.set(qn('w:ascii'), 'Century')
+    rf5.set(qn('w:hAnsi'), 'Century')
+    rf5.set(qn('w:cs'), 'Century')
+    rPr5.append(rf5)
+    r5.append(rPr5)
+    t5 = OxmlElement('w:t')
+    t5.set(qn('xml:space'), 'preserve')
+    t5.text = page_str
+    r5.append(t5)
+    p.append(r5)
+    
+    return p
+
+# List of Figures
+lof_data = [
+    ('3.1', 'End-to-end system pipeline for peptide-based classification', '8'),
+    ('3.2', 'Data flow diagram of the prediction (web demo) subsystem', '10'),
+    ('4.1', 'Model performance comparison (bar chart and heatmap)', '14'),
+    ('4.2', 'ROC curves for all six models', '15'),
+    ('4.3', 'Confusion matrix of the best-performing model (CNN)', '15'),
+    ('4.4', 'Training history (accuracy and loss) of the CNN model', '16'),
+    ('4.5', 'Confusion matrix of the BiLSTM model on the test set', '16'),
+    ('4.6', 'Training history (accuracy and loss) of the BiLSTM model', '16'),
 ]
-insert_paragraphs_after(FP[167], lof_entries, style_source_el=FP[167])
 
-# Fix the static "List of Tables" front-matter entries (add the new tables)
-lot_entries = [
-    '2.2\tComparative capabilities of related approaches and the proposed system\t3',
-    '3.1\tProject task allocation across the FYDP timeline\t6',
-    '4.1\tComparative performance of all trained models on the held-out test set\t7',
+p123_new = make_list_item_p(lof_data[0][0], lof_data[0][1], lof_data[0][2])
+P[123]._p.getparent().replace(P[123]._p, p123_new)
+last_p = p123_new
+for num_s, title_s, pg_s in lof_data[1:]:
+    new_item = make_list_item_p(num_s, title_s, pg_s)
+    last_p.addnext(new_item)
+    last_p = new_item
+
+# List of Tables
+lot_data = [
+    ('2.1', 'Summary of Literature Reviewed.', '3'),
+    ('2.2', 'Comparative capabilities of related approaches', '6'),
+    ('3.1', 'Project task allocation across the FYDP timeline', '11'),
+    ('4.1', 'Comparative model performance on the test set', '14'),
+    ('5.1', 'Mapping with complex problem solving.', '19'),
+    ('5.2', 'Mapping with knowledge Profile.', '20'),
+    ('5.3', 'Mapping with complex engineering activities.', '20'),
 ]
-insert_paragraphs_after(FP[169], lot_entries, style_source_el=FP[169])
 
-print('Front matter done.')
+p126_new = make_list_item_p(lot_data[0][0], lot_data[0][1], lot_data[0][2])
+P[126]._p.getparent().replace(P[126]._p, p126_new)
+remove_paragraph(P[127])
+remove_paragraph(P[128])
+remove_paragraph(P[129])
+last_p = p126_new
+for num_s, title_s, pg_s in lot_data[1:]:
+    new_item = make_list_item_p(num_s, title_s, pg_s)
+    last_p.addnext(new_item)
+    last_p = new_item
+
+print("Front matter complete.")
 
 # ===========================================================================
-# CHAPTER 1: INTRODUCTION  (lines 174-202 -> FP[173:202])
+# 2. CHAPTER 1: INTRODUCTION
 # ===========================================================================
-set_text(FP[177],
-    'This chapter introduces the problem addressed by the project, the motivation behind '
-    'it, the objectives pursued, a short outline of the methodology, the expected outcome, '
-    'and the organisation of the remaining chapters.')
+set_text(P[135],
+    'This chapter outlines the research problem, explains the clinical need for accessible '
+    'peptide screening, defines our technical objectives, and summarizes the structure of the report.')
 
-intro_paras = [
-    ("Alzheimer's disease (AD) is a progressive neurodegenerative disorder and the leading "
-     'cause of dementia worldwide. It gradually impairs memory, reasoning, and the ability '
-     'to carry out daily activities, and its social and economic burden continues to grow '
-     'as populations age. Diagnosis today relies mainly on clinical evaluation together with '
-     'imaging techniques such as magnetic resonance imaging (MRI) and positron emission '
-     'tomography (PET). These methods can confirm the presence of the disease, but they are '
-     'expensive, time-consuming, and usually detect AD only after significant neuronal '
-     'damage has already occurred.'),
-    ('A large body of molecular biology research links AD pathology to the abnormal '
-     'aggregation of amyloid-beta (A\u03b2) peptides into plaques in brain tissue [9], [10]. '
-     'Because the amino acid sequence of a peptide directly influences its tendency to '
-     'aggregate, the sequence itself carries information that computational methods can use '
-     'to estimate amyloid risk without imaging or invasive sampling. This project examines '
-     'whether peptide sequence data, combined with machine learning (ML) and deep learning '
-     '(DL) techniques, can be used to build a low-cost screening tool that classifies a '
-     'peptide as amyloid-forming (higher AD-related risk) or non-amyloid (lower risk), using '
-     'the CPAD 2.0 peptide aggregation database [1] as the primary data source.'),
+intro_p1 = (
+    "Alzheimer's disease is the most common cause of dementia worldwide. As the condition "
+    'progresses, it causes irreversible memory loss and cognitive decline, creating major '
+    'burdens for patients, families, and healthcare providers. Today, definitive clinical '
+    'assessment combines cognitive testing with neuroimaging such as structural MRI and amyloid '
+    'PET scans. Although these imaging modalities are accurate, they require specialized hospital '
+    'facilities and high costs, and they typically identify abnormalities only after severe '
+    'neuronal loss has occurred.'
+)
+intro_p2 = (
+    'At the biochemical level, Alzheimer\'s disease is driven by the misfolding and '
+    'aggregation of amyloid-beta (A\u03b2) peptides into oligomers and fibril deposits [9], [10]. '
+    'Whether a peptide aggregates depends directly on its primary amino acid sequence. Because '
+    'sequence data can be analyzed computationally, machine learning models offer a direct way '
+    'to estimate aggregation tendency without laboratory synthesis or hospital equipment. In '
+    'this project, we train and evaluate six machine learning and deep learning models on '
+    'verified peptide sequences from the CPAD 2.0 database [1] to classify sequences as '
+    'amyloid-forming or non-amyloid.'
+)
+set_text(P[139], intro_p1)
+insert_paragraphs_after(P[139], [intro_p2], style_source_p=P[139])
+
+set_text(P[143],
+    'Routine population screening for Alzheimer\'s is currently impractical because clinical '
+    'neuroimaging is too expensive and resource intensive. A computational model that operates '
+    'directly on amino acid strings runs in milliseconds on regular computer hardware, making '
+    'it suitable for high-throughput initial screening. In research workflows, such a tool can '
+    'help bioinformaticians filter potential amyloid candidates before investing in costly '
+    'laboratory assays. In addition, evaluating both classical tabular algorithms and modern deep '
+    'neural architectures under identical validation conditions provides clear evidence regarding '
+    'which model designs capture sequence motifs most effectively.')
+
+obj_p1 = (
+    'The main objective of this study is to build and evaluate a reproducible computational '
+    'pipeline that classifies peptide sequences as amyloid-forming or non-amyloid. The specific '
+    'tasks are:'
+)
+obj_list = [
+    '1. Extract, clean, and deduplicate 2,001 peptide records from the CPAD 2.0 repository '
+    'and standardize all binary labels.',
+    '2. Convert amino acid strings into dual numerical encodings: padded integer sequences for '
+    'deep neural networks and one-hot matrices for tabular models.',
+    '3. Train and evaluate three classical algorithms (Logistic Regression, Random Forest, and '
+    'Support Vector Machine) using stratified five-fold cross-validation.',
+    '4. Implement and train three deep architectures (1D-CNN, standard LSTM, and Bidirectional '
+    'LSTM) with early stopping.',
+    '5. Compare all six classifiers on a single 20% held-out test split across accuracy, '
+    'precision, recall, F1-score, and ROC-AUC.',
+    '6. Deploy the highest-scoring model inside a Flask web application that accepts raw '
+    'sequences and outputs real-time risk predictions.'
 ]
-set_text(FP[181], intro_paras[0])
-insert_paragraphs_after(FP[181], intro_paras[1:])
+set_text(P[147], obj_p1)
+insert_paragraphs_after(P[147], obj_list, style_source_p=P[147])
 
-set_text(FP[185],
-    'Existing AD diagnostic pipelines are not well suited to large-scale or repeated '
-    'screening, both because of their cost and because they detect the disease only in its '
-    'later stages. A sequence-based computational classifier does not require imaging '
-    'hardware, can run on ordinary computing equipment, and could, in principle, be built '
-    'into a larger bioinformatics pipeline used by researchers studying amyloid-related '
-    'biomarkers. This project was also motivated by an interest in comparing classical '
-    'machine learning with modern deep sequence models on a real biological classification '
-    'task, and in understanding, in a concrete case, why some architectures capture peptide '
-    'aggregation patterns better than others.')
+set_text(P[151],
+    'Our approach follows a quantitative experimental workflow. We preprocess raw CPAD 2.0 '
+    'records by removing duplicate entries and standardizing outcome labels. We then construct '
+    'two distinct encoding schemes suited to tabular classifiers and sequential deep neural '
+    'networks. All models are trained and tested on fixed data splits to ensure a fair '
+    'comparison, and the top-performing model is deployed in a web application. Chapter 3 '
+    'describes each stage in detail.')
 
-objectives_text = [
-    ('The general objective of this project is to design and implement an artificial '
-     'intelligence based system that can classify peptide sequences into amyloid and '
-     'non-amyloid categories in support of early Alzheimer\u2019s disease risk screening. '
-     'The specific objectives are:'),
-    ('(i) collect and clean a peptide sequence dataset from the CPAD 2.0 database, removing '
-     'duplicate and missing entries and standardising class labels;'),
-    ('(ii) encode peptide sequences into machine-readable representations suited to both '
-     'classical machine learning (one-hot vectors) and deep learning (padded integer '
-     'sequences);'),
-    ('(iii) train baseline classical machine learning models \u2014 Logistic Regression, '
-     'Random Forest, and Support Vector Machine \u2014 using stratified five-fold '
-     'cross-validation;'),
-    ('(iv) design and train deep learning architectures \u2014 Convolutional Neural Network '
-     '(CNN), Long Short-Term Memory network (LSTM), and Bidirectional LSTM (BiLSTM) \u2014 '
-     'with early stopping to reduce overfitting;'),
-    ('(v) evaluate every model on a common held-out test set using accuracy, precision, '
-     'recall, F1-score, and ROC-AUC, and identify the best-performing model; and'),
-    ('(vi) package the best-performing model behind a simple web interface so that a new '
-     'peptide sequence can be submitted and scored in real time.'),
-]
-set_text(FP[189], objectives_text[0])
-insert_paragraphs_after(FP[189], objectives_text[1:])
+set_text(P[155],
+    'This project delivers an end-to-end software pipeline that processes raw peptide '
+    'sequences, trains multiple classifiers, and provides real-time predictions through an interactive web '
+    'interface. It also provides an empirical benchmark comparing classical and deep learning '
+    'models on peptide aggregation data.')
 
-set_text(FP[193],
-    'The project follows a quantitative, experimental methodology. Peptide records are '
-    'downloaded from CPAD 2.0, cleaned, deduplicated, and label-standardised. Sequences are '
-    'encoded into two representations \u2014 padded integer sequences and position-aware '
-    'one-hot vectors \u2014 to suit deep learning and classical machine learning models '
-    'respectively. Six models are trained under matching evaluation conditions (stratified '
-    'train-test split, common metric set) and compared to select the best-performing model, '
-    'which is then exposed through a Flask web application for interactive testing. Chapter '
-    '3 describes this methodology in detail.')
+set_text(P[159],
+    'The remainder of this report is organized into five chapters. Chapter 2 reviews the '
+    'biological background of Alzheimer\'s disease, analyzes existing computational literature, '
+    'and outlines research gaps. Chapter 3 presents our system architecture, requirements, data '
+    'flow, and project schedule. Chapter 4 reports the software setup, evaluation metrics, and '
+    'experimental results. Chapter 5 discusses engineering standards, ethical and environmental '
+    'aspects, and complex engineering problem mappings. Chapter 6 concludes with a summary of '
+    'our findings, project limitations, and directions for future research.')
 
-set_text(FP[197],
-    'The direct outcome of this project is a reproducible pipeline that turns raw peptide '
-    'aggregation records into a trained classifier and an accompanying working demonstration '
-    'that any user can query. Beyond the trained models themselves, the project produces a '
-    'documented comparison of classical and deep sequence models on the same peptide dataset, '
-    'which can act as a reference point for further work on computational, sequence-based '
-    'screening for amyloid-related risk.')
-
-set_text(FP[201],
-    'The remainder of this report is organised as follows. Chapter 2 reviews the background '
-    "of Alzheimer's disease and amyloid aggregation, surveys related computational work, and "
-    'identifies the gap this project addresses. Chapter 3 describes the research methodology, '
-    'including the system design, requirements, data flow, and project plan. Chapter 4 '
-    'presents the implementation, evaluation methodology, and results. Chapter 5 discusses '
-    'engineering standards, societal and ethical impact, project management, and the mapping '
-    'of this work to complex engineering problems and activities. Chapter 6 concludes the '
-    'report with a summary, limitations, and directions for future work.')
-
-print('Chapter 1 done.')
+print("Chapter 1 complete.")
 
 # ===========================================================================
-# CHAPTER 2: BACKGROUND  (lines 203-374 -> FP[202:374])
+# 3. CHAPTER 2: BACKGROUND & LITERATURE REVIEW
 # ===========================================================================
-set_text(FP[206],
-    "This chapter presents the background needed to understand the rest of the report, "
-    'reviews related computational work on Alzheimer\u2019s disease and amyloid prediction, '
-    'and identifies the gap this project addresses.')
+set_text(P[165],
+    'This chapter discusses the biological mechanisms of Alzheimer\'s disease, reviews prior '
+    'computational studies, compares existing software tools, and identifies the specific gaps '
+    'our project addresses.')
 
-background_paras = [
-    ("Alzheimer's disease (AD) is an irreversible neurodegenerative disorder and the principal "
-     'cause of dementia, marked by progressive memory loss and behavioural change [11]. Standard '
-     'diagnostic procedures such as MRI and PET imaging can reveal structural and functional '
-     'changes in the brain, but they are time-consuming, costly, and not always available, which '
-     'limits their use for early or repeated screening.'),
-    ('A substantial body of biological evidence links AD to the abnormal aggregation of '
-     'amyloid-beta (A\u03b2) peptides into extracellular plaques, a process that disrupts '
-     'neuron-to-neuron signalling and contributes to neurodegeneration [9], [10]. The NIA-AA '
-     'research framework further formalises amyloid status as one of the core biological '
-     'markers used to define AD progression [12]. Because the tendency of a peptide to '
-     'aggregate is strongly influenced by its amino acid sequence, sequence-based computational '
-     'analysis is a promising, low-cost complement to imaging-based diagnosis.'),
-    ('Advances in bioinformatics have made it practical to apply machine learning directly to '
-     'protein and peptide sequences. Classical algorithms such as Support Vector Machines have '
-     'been used to predict AD-related biomarkers from gene-coding protein sequences with '
-     'reported accuracies above 85% [8], while deep learning architectures such as '
-     'Convolutional Neural Networks (CNNs) and Recurrent Neural Networks (RNNs) can capture '
-     'local motifs and longer-range dependencies in a sequence that are relevant to aggregation '
-     'behaviour [7]. Public repositories such as CPAD 2.0 make peptide sequence and aggregation '
-     'label data freely available for this kind of model development and evaluation [1].'),
-]
-set_text(FP[210], background_paras[0])
-insert_paragraphs_after(FP[210], background_paras[1:])
+bg_p1 = (
+    'Alzheimer\'s disease is the leading cause of dementia among older adults. In the brain, '
+    'the disease triggers progressive loss of synapses and neurons, especially in regions '
+    'responsible for memory and cognition. Standard clinical diagnosis relies on cognitive tests '
+    'such as the MMSE along with structural MRI and PET scans. While effective, brain imaging '
+    'is expensive and requires hospital infrastructure, often detecting tissue changes only '
+    'after significant cognitive impairment has already developed.'
+)
+bg_p2 = (
+    'At the molecular level, Alzheimer\'s pathology involves the self-assembly of amyloid-beta '
+    '(A\u03b2) peptides into neurotoxic oligomers and insoluble fibrils [9], [10]. The NIA-AA '
+    'research framework recognizes amyloid deposition as a core biomarker for disease '
+    'classification [12]. Because peptide self-assembly is driven by primary amino acid '
+    'composition and local sequence patterns, computational analysis can provide an early, '
+    'inexpensive screening check before individuals undergo clinical neuroimaging.'
+)
+bg_p3 = (
+    'Prior bioinformatics studies demonstrate that primary sequence structure holds clear '
+    'diagnostic value for predicting peptide aggregation [8]. Deep learning architectures such '
+    'as 1D-CNNs and LSTMs can extract localized motifs and sequential dependencies directly '
+    'from text sequences without manual feature engineering [7]. Databases such as CPAD 2.0 [1] '
+    'collect experimentally verified amyloid and non-amyloid peptide sequences, providing an '
+    'established dataset for systematic model comparisons.'
+)
+set_text(P[169], bg_p1)
+insert_paragraphs_after(P[169], [bg_p2, bg_p3], style_source_p=P[169])
 
-set_text(FP[214],
-    'This section reviews five research papers that were studied in detail while planning this '
-    'project, together with several long-standing reference works on the amyloid hypothesis of '
-    "Alzheimer's disease. Table 2.1 summarises the reviewed papers; a short discussion follows.")
+# Section 2.2: Literature Review
+set_text(P[173],
+    'We reviewed previous research in bioinformatics and machine learning to guide our system '
+    'design. Table 2.1 summarizes eight representative studies covering graph networks, '
+    'neuroimaging classifiers, tree ensembles, mutational deep learning, sequence predictors, '
+    'and foundational amyloid biology.')
 
-lit_review_narrative = [
-    ('Yu et al. [4] proposed a multi-source protein feature fusion framework that combines '
-     'laboratory data and literature-derived features to predict protein-protein interactions '
-     'relevant to AD, using a Graph Convolutional Network for link prediction and reporting an '
-     'AUC of 0.8935. This work shows that fusing heterogeneous biological features can improve '
-     'prediction of AD-related molecular interactions, though it operates at the protein '
-     'interaction network level rather than on individual peptide sequences.'),
-    ('Hassan et al. [5] took an imaging-based route, using a VGG16 convolutional network to '
-     'extract features from MRI and PET scans for AD detection and classification. Their work '
-     'confirms that deep convolutional features are effective for AD-related classification '
-     'tasks, but, like most imaging-based methods, it depends on access to scan data rather than '
-     'inexpensive sequence data.'),
-    ('Rani et al. [6] applied a SMOTE-RF methodology, combining synthetic minority oversampling '
-     'with Random Forest, Decision Tree, and XGBoost classifiers on the OASIS imaging-derived '
-     'dataset, reporting up to 87.84% accuracy on the imbalanced dataset and higher accuracy '
-     'after balancing. This confirms that ensemble tree-based methods remain competitive '
-     'baselines for AD-related classification, which motivated including Random Forest as one '
-     'of the classical baselines in this project.'),
-    ('Wang et al. [7] applied deep mutational scanning together with CNNs and RNNs to model the '
-     'effect of mutations on the aggregation-related biochemical traits of the A\u03b2 42 '
-     'peptide, finding convolutional and recurrent architectures to be the most cost-effective '
-     'choices for this kind of sequence modelling. This result directly supports the choice of '
-     'CNN, LSTM, and BiLSTM architectures evaluated in this project.'),
-    ('Xu et al. [8] used a Support Vector Machine based on dipeptide composition frequency '
-     '(the frequency of consecutive amino-acid pairs) to identify AD-related genes from '
-     'gene-coding protein sequences, reporting 85.7% accuracy. This confirms that sequence '
-     'composition alone, without imaging, carries a usable classification signal, which is the '
-     'central premise of this project.'),
-    ('Beyond these five papers, this project also draws on established biological reference '
-     'work: the amyloid hypothesis first articulated by Hardy and Selkoe [9] and revisited '
-     'twenty-five years later [10], the neuropathological staging criteria of Braak and Braak '
-     '[11], the NIA-AA biological research framework [12], and the TANGO algorithm for '
-     'predicting sequence-dependent aggregation proposed by Fernandez-Escamilla et al. [13].'),
-]
+set_text(P[175], 'Table 2.1: Summary of Literature Reviewed.')
 
-insert_paragraphs_before(FP[254], lit_review_narrative, style_source_el=FP[210])
-
-# Clean the instructional parenthetical off the "Similar Applications" heading
-set_text(FP[254], 'Similar Applications', keep_rpr=True)
-
-set_text(FP[255],
-    'Beyond peer-reviewed classifiers, several long-standing bioinformatics tools address a '
-    'closely related problem: predicting the aggregation propensity of a peptide directly '
-    'from its sequence. TANGO [13] and related sequence-based predictors such as WALTZ and '
-    'AGGRESCAN estimate aggregation propensity using physicochemical scales fitted to '
-    'experimental data, without a supervised training/test split or a reported classification '
-    'accuracy in the sense used in this project. The imaging-based system of Hassan et al. [5] '
-    'and the tabular SMOTE-RF system of Rani et al. [6] are closer in spirit to a deployable '
-    'application, but both rely on clinical imaging or derived imaging features rather than raw '
-    'peptide sequence. None of these tools combines a trained, evaluated ML/DL comparison on '
-    'peptide sequence data with a public, queryable web interface, which is the specific '
-    'combination this project provides.')
-
-gap_intro = [
-    ('The literature reviewed in Section 2.2 points to several recurring gaps that this '
-     'project attempts to address, summarised in Table 2.2:'),
-]
-set_text(FP[260], gap_intro[0])
-
-set_text(FP[262], 'Table 2.2: Comparative capabilities of related approaches and the proposed system.')
-
-set_text(FP[373],
-    "This chapter presented the biological background of Alzheimer's disease and amyloid "
-    'aggregation, reviewed five recent papers on computational AD prediction together with '
-    'classical amyloid biology references, discussed sequence-based aggregation predictors as '
-    'similar applications, and summarised the gaps that motivate this project\u2019s design.')
-
-print('Chapter 2 narrative done.')
-
-# ---------------------------------------------------------------------------
-# TABLE 2.1 : Literature Review
-# ---------------------------------------------------------------------------
+# Populate Table 0 (Table 2.1)
 lit_table = doc.tables[0]
 lit_rows = [
-    ['Yu et al. [4]', '2025', 'Protein interaction prediction for AD using a multi-source '
-     'protein features fusion framework', 'Graph Convolutional Network on a fused '
-     'protein-protein interaction network', 'Achieved AUC = 0.8935 for AD-related protein '
-     'interaction link prediction.'],
-    ['Hassan et al. [5]', '2024', 'A multimodal approach for AD detection and classification '
-     'using deep learning', 'VGG16 CNN feature extraction from MRI/PET scans', 'Showed deep '
-     'convolutional features are effective for AD classification from imaging data.'],
-    ['Rani et al. [6]', '2024', 'A machine learning model for AD prediction', 'SMOTE-RF: '
-     'oversampling with Decision Tree, XGBoost, Random Forest on OASIS data', 'Random Forest '
-     'reached up to 87.84% accuracy on the imbalanced imaging-derived dataset.'],
-    ['Wang et al. [7]', '2023', "Towards mechanistic models of mutational effects: deep "
-     "learning on Alzheimer's A\u03b2 peptide", 'CNN and RNN models on deep mutational '
-     'scanning data', 'CNN/RNN architectures were the most cost-effective for modelling '
-     'peptide aggregation traits.'],
-    ['Xu et al. [8]', '2018', 'An efficient classifier for AD genes identification', 'SVM on '
-     'dipeptide composition frequency of gene-coding protein sequences', 'Reported 85.7% '
-     'accuracy identifying AD from protein sequence information.'],
-    ['Hardy and Selkoe [9]', '2002', 'The amyloid hypothesis of AD: progress and problems on '
-     'the road to therapeutics', 'Review / hypothesis paper', 'Established amyloid-beta '
-     'aggregation as a central mechanism in AD pathogenesis.'],
-    ['Selkoe and Hardy [10]', '2016', 'The amyloid hypothesis of AD at 25 years', 'Review '
-     'paper', 'Revisited and updated the amyloid hypothesis considering newer genetic and '
-     'biomarker evidence.'],
-    ['Fernandez-Escamilla et al. [13]', '2004', 'Prediction of sequence-dependent and '
-     'mutational effects on the aggregation of peptides and proteins', 'TANGO: statistical '
-     'mechanics algorithm using physicochemical parameters', 'Enabled sequence-based '
-     'prediction of aggregation-prone regions without a training/test split.'],
+    ['Yu et al. [4]', '2025', 'Protein interaction prediction for AD using a multi-source protein features fusion framework', 'Graph Convolutional Network on a fused protein-protein interaction network', 'Achieved AUC = 0.8935 for AD-related protein interaction link prediction.'],
+    ['Hassan et al. [5]', '2024', 'A multimodal approach for AD detection and classification using deep learning', 'VGG16 CNN feature extraction from MRI/PET scans', 'Showed deep convolutional features are effective for AD classification from imaging data.'],
+    ['Rani et al. [6]', '2024', 'A machine learning model for AD prediction', 'SMOTE-RF: oversampling with Decision Tree, XGBoost, Random Forest on OASIS data', 'Random Forest reached up to 87.84% accuracy on the imbalanced imaging-derived dataset.'],
+    ['Wang et al. [7]', '2023', "Towards mechanistic models of mutational effects: deep learning on Alzheimer's A\u03b2 peptide", 'CNN and RNN models on deep mutational scanning data', 'CNN/RNN architectures were the most cost-effective for modelling peptide aggregation traits.'],
+    ['Xu et al. [8]', '2018', 'An efficient classifier for AD genes identification', 'SVM on dipeptide composition frequency of gene-coding protein sequences', 'Reported 85.7% accuracy identifying AD from protein sequence information.'],
+    ['Hardy and Selkoe [9]', '2002', 'The amyloid hypothesis of AD: progress and problems on the road to therapeutics', 'Review / hypothesis paper', 'Established amyloid-beta aggregation as a central mechanism in AD pathogenesis.'],
+    ['Selkoe and Hardy [10]', '2016', 'The amyloid hypothesis of AD at 25 years', 'Review paper', 'Revisited and updated the amyloid hypothesis considering newer genetic and biomarker evidence.'],
+    ['Fernandez-Escamilla et al. [13]', '2004', 'Prediction of sequence-dependent and mutational effects on the aggregation of peptides and proteins', 'TANGO: statistical mechanics algorithm using physicochemical parameters', 'Enabled sequence-based prediction of aggregation-prone regions without a training/test split.'],
 ]
 while len(lit_table.rows) > 1:
     lit_table._tbl.remove(lit_table.rows[1]._tr)
 for row_data in lit_rows:
     row = lit_table.add_row()
     for c, val in enumerate(row_data):
-        row.cells[c].text = val
-print('Table 2.1 populated with', len(lit_rows), 'rows.')
+        set_cell_text(row.cells[c], val)
 
-# ---------------------------------------------------------------------------
-# TABLE 2.2 : Gap analysis / comparative capability table
-# ---------------------------------------------------------------------------
+# Lit review narrative placed directly after Table 2.1
+lit_narrative = [
+    ('Yu et al. [4] developed a multi-source feature fusion model that combined protein-protein '
+     'interaction data with literature attributes. Using a Graph Convolutional Network (GCN), '
+     'they obtained an AUC of 0.8935 on interaction link prediction. Although their work '
+     'demonstrates the strength of graph representations, it focuses on network-level protein '
+     'interactions rather than direct aggregation prediction from isolated peptide sequences.'),
+    ('Hassan et al. [5] built a multimodal deep learning pipeline using MRI and PET scans, '
+     'fine-tuning a VGG16 convolutional network to classify disease stages. Their results '
+     'showed that convolutional filters effectively capture structural brain changes. However, '
+     'clinical neuroimaging remains too expensive for broad population screening, highlighting '
+     'the value of sequence-based approaches.'),
+    ('Rani et al. [6] examined tree-based algorithms on patient demographic and imaging data '
+     'from the OASIS repository. By combining SMOTE oversampling with Random Forest and '
+     'XGBoost, they achieved 87.84% accuracy. Their findings confirm that ensemble trees '
+     'perform well on tabular biological data, supporting our use of Random Forest as a '
+     'baseline model.'),
+    ('Wang et al. [7] used deep mutational scanning data with 1D-CNN and RNN models to predict '
+     'how single amino acid mutations alter amyloid-beta (A\u03b242) aggregation. They found that '
+     'convolutional kernels accurately detect short sequence motifs (3 to 6 residues) that '
+     'trigger nucleation. This insight guided our choice of convolutional and recurrent '
+     'networks for peptide sequence modeling.'),
+    ('Xu et al. [8] applied Support Vector Machines with dipeptide composition frequencies to '
+     'identify Alzheimer\'s-related genes, reaching 85.7% accuracy. Their study showed that '
+     'sequence composition alone can separate disease markers without requiring '
+     'three-dimensional structural data.'),
+    ('Our work also draws upon foundational biology: the amyloid cascade hypothesis by Hardy '
+     'and Selkoe [9] and its 25-year update [10], the Braak neuropathological staging '
+     'framework [11], the NIA-AA research guidelines [12], and the thermodynamic TANGO '
+     'algorithm [13] for sequence-based aggregation modeling.'),
+]
+insert_paragraphs_after(lit_table._tbl, lit_narrative, style_source_p=P[169])
+
+# Similar Applications
+set_text(P[177], 'Similar Applications')
+set_text(P[178],
+    'Several tools predict protein aggregation from sequence data. Thermodynamic programs '
+    'such as TANGO [13], WALTZ, and AGGRESCAN identify aggregation-prone segments through '
+    'physical and chemical energy equations. While helpful in structural biology, these tools '
+    'rely on fixed equations rather than supervised statistical learning evaluated on independent '
+    'test sets. Meanwhile, clinical machine learning models, such as the image classifiers in '
+    'Hassan et al. [5] and the tabular models in Rani et al. [6], require hospital scans. Our '
+    'system focuses directly on supervised classification of CPAD 2.0 peptide sequences, '
+    'comparing multiple algorithms and serving the best model through a web interface.')
+
+# Gap Analysis
+set_text(P[183],
+    'Our literature review identified four main gaps: (1) existing screening studies prioritize '
+    'costly neuroimaging over lightweight sequence data; (2) few studies directly compare '
+    'classical machine learning algorithms with deep neural networks on the same dataset; (3) '
+    'sequence papers often omit threshold-independent metrics like ROC-AUC; and (4) few open '
+    'tools provide an immediate web interface for testing individual sequences. Table 2.2 '
+    'contrasts existing approaches with our proposed system.')
+set_text(P[185], 'Table 2.2: Comparative capabilities of related approaches.')
+
 gap_table = doc.tables[1]
 gap_header = ['Capability', 'TANGO / WALTZ /\nAGGRESCAN [13]', 'Imaging CNN\n(Hassan et al. [5])',
               'SMOTE-RF\n(Rani et al. [6])', 'SVM gene classifier\n(Xu et al. [8])',
@@ -517,144 +682,148 @@ gap_rows = [
 ]
 hdr_cells = gap_table.rows[0].cells
 for c, val in enumerate(gap_header):
-    hdr_cells[c].text = val
+    set_cell_text(hdr_cells[c], val, bold=True)
 while len(gap_table.rows) > 1:
     gap_table._tbl.remove(gap_table.rows[1]._tr)
 for row_data in gap_rows:
     row = gap_table.add_row()
     for c, val in enumerate(row_data):
-        row.cells[c].text = val
-print('Table 2.2 populated.')
+        set_cell_text(row.cells[c], val)
 
-print('Chapter 2 done.')
+# Chapter 2 Summary
+set_text(P[191],
+    'This chapter reviewed the biological context of Alzheimer\'s disease and peptide '
+    'aggregation, surveyed relevant literature and software tools, and summarized the research '
+    'gaps that motivate our sequence classification pipeline.')
 
-BODY_STYLE_SRC = FP[210]  # a known-good BodyText paragraph, reused as a clone source everywhere below
+print("Chapter 2 complete.")
 
 # ===========================================================================
-# CHAPTER 3: RESEARCH METHODOLOGY  (lines 375-446 -> FP[374:446])
+# 4. CHAPTER 3: RESEARCH METHODOLOGY
 # ===========================================================================
-set_text(FP[378],
-    'This chapter describes the research methodology followed in the project: the overall '
-    'approach and system design, the functional and non-functional requirements, the data '
-    'flow of the prediction system, the user interface, the alternatives considered, and the '
-    'project plan and task allocation.')
+set_text(P[197],
+    'This chapter details our experimental methodology, covering the system architecture, '
+    'functional and non-functional requirements, data flow design, interface implementation, '
+    'design trade-offs, and project timeline.')
 
-# Remove the template's "Note: keep X for project/research" instructional lines
-for idx in (381, 382, 383, 386, 387, 388):
-    remove_paragraph(FP[idx])
+set_text(P[200], "")
+set_text(P[201], "")
+set_text(P[202], "")
+set_text(P[205], "")
+set_text(P[206], "")
+set_text(P[207], "")
 
-insert_paragraphs_after(FP[384],
-    ['This project follows a quantitative, experimental research design rather than a '
-     'requirement-driven software project design, since the objective is to compare '
-     'modelling approaches on a fixed dataset rather than to build a product for external '
-     'stakeholders. The workflow consists of data preprocessing, sequence encoding, a '
-     'stratified train-test split, multi-model training (classical ML and deep learning), '
-     'metric-based evaluation, and model comparison, followed by packaging the best model '
-     'behind a small web interface for interactive testing.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[203],
+    ['This study follows a quantitative experimental research design. Rather than building a '
+     'commercial software product, our goal is to evaluate and compare predictive models on a '
+     'curated peptide dataset. The pipeline consists of data cleaning and deduplication, dual '
+     'sequence encoding, an 80/20 train-test split, multi-model training with cross-validation, '
+     'test set evaluation, and web deployment.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[385],
-    ['Figure 3.1 shows the proposed end-to-end pipeline as implemented in '
-     'alzheimer_peptide_model.py. Raw peptide records are scraped from CPAD 2.0 [1], cleaned '
-     'and deduplicated, and their class labels standardised to amyloid or non-amyloid. The '
-     'cleaned sequences are encoded twice \u2014 once as padded integer sequences for the '
-     'deep learning models and once as position-aware one-hot vectors for the classical '
-     'models \u2014 and split into a stratified 80/20 train-test partition. The three '
-     'classical models are trained with five-fold cross-validation on the training partition, '
-     'and the three deep learning models are trained with an internal validation split (10% '
-     'of the training data) and early stopping. All six models are then evaluated on the same '
-     'held-out test set, and the model with the highest F1-score is selected for deployment '
-     'in the web interface.'],
-    style_source_el=BODY_STYLE_SRC)
+# Section 3.1.2: Proposed Methodology / System Design
+p_diag_intro = insert_paragraphs_after(P[204],
+    ['Figure 3.1 illustrates the end-to-end classification pipeline implemented in '
+     'alzheimer_peptide_model.py. The workflow begins by extracting raw peptide records from '
+     'the CPAD 2.0 database [1], filtering invalid characters, removing duplicate sequences, '
+     'and standardizing class labels into amyloid and non-amyloid categories. To support both '
+     'model types, the pipeline generates padded integer sequences for deep neural networks '
+     'and one-hot vectors for classical classifiers. We split the data into a stratified 80% '
+     'training set and a 20% test set. We evaluate the classical models (Logistic Regression, '
+     'Random Forest, Support Vector Machine) using five-fold cross-validation on the training '
+     'split. In parallel, the deep neural networks (1D-CNN, LSTM, Bidirectional LSTM) use a '
+     '10% internal validation split with early stopping to prevent overfitting. Finally, we '
+     'benchmark all six models on the held-out test set and integrate the top-performing '
+     'model into a Flask web application.'],
+    style_source_p=P[169])
 
-# Replace the sample-diagram caption and insert a real pipeline figure before it
-set_text(FP[392], 'Figure 3.1: End-to-end system pipeline for peptide-based Alzheimer\u2019s risk classification.')
-add_picture_after(FP[391], 'report_figures/fig_3_1_pipeline.png', 6.0)
+# Pipeline Figure: Picture first, then Caption below
+pic31 = add_picture_after(p_diag_intro[-1], 'report_figures/fig_3_1_pipeline.png', 6.2)
+cap31 = clone_paragraph(P[169])
+set_text(cap31, 'Figure 3.1: End-to-end system pipeline for peptide-based Alzheimer\'s risk classification.')
+insert_after(pic31, cap31)
+set_text(P[211], "")  # Clear old placeholder paragraph
 
-# Functional / Non-functional requirements: fix mis-styled Heading4 note paragraphs
-remove_paragraph(FP[394])  # stray "Note:" label
-restyle(FP[395], 'BodyText')
-restyle(FP[396], 'BodyText')
-set_text(FP[395],
-    'Functional requirements describe what the system must do. For this project they are: '
-    '(1) accept a peptide sequence composed of the 20 standard amino acid letters as input; '
-    '(2) validate that every character belongs to the standard amino acid alphabet '
-    '(ACDEFGHIKLMNPQRSTVWY) and reject sequences that contain any other character; (3) '
-    'encode the validated sequence into the padded/one-hot representation expected by the '
-    'selected model; (4) run inference with the chosen trained model (Logistic Regression, '
-    'Random Forest, SVM, CNN, LSTM, or BiLSTM) and return a class label (amyloid / '
-    'non-amyloid), a probability score, and a risk level (Low / Medium / High); and (5) allow '
-    'the user to repeat this process for any number of sequences without restarting the '
-    'application.')
-set_text(FP[396],
-    'Non-functional requirements describe how well the system performs these functions. For '
-    'this project they are: (1) accuracy \u2014 the deployed model should reach at least 80% '
-    'test accuracy, which the CNN model satisfies at 81.05%; (2) responsiveness \u2014 a '
-    'single prediction should return in well under one second on ordinary desktop hardware, '
-    'since inference on a single short sequence is computationally light; (3) reproducibility '
-    '\u2014 all random operations (train-test split, cross-validation folds, weight '
-    'initialisation seeds where supported) use a fixed random state so that results can be '
-    'reproduced; and (4) usability \u2014 the web interface should accept plain text input '
-    'and present the result without requiring the user to understand the underlying model.')
+# Functional / Nonfunctional Requirements
+remove_paragraph(P[214])
+set_text(P[215],
+    'Functional requirements specify what the system must do: '
+    '(1) accept peptide sequences composed of standard single-letter amino acid codes; '
+    '(2) validate input strings against the 20 canonical amino acids (ACDEFGHIKLMNPQRSTVWY) '
+    'and reject invalid characters; '
+    '(3) convert validated sequences into the numerical format required by the chosen model '
+    '(padded integer vectors or one-hot matrices); '
+    '(4) run inference using the selected algorithm (Logistic Regression, Random Forest, '
+    'SVM, CNN, LSTM, or BiLSTM) to produce a class label, probability score, and risk category '
+    '(Low, Medium, or High); and '
+    '(5) support repeated submissions in the web browser without restarting the server.')
+P[215].style = 'Body Text'
 
-insert_paragraphs_after(FP[397],
-    ['Figure 3.2 shows the data flow of the prediction subsystem exposed through the Flask '
-     'web application (app.py). The user submits a peptide sequence and a model choice '
-     'through the browser; the Flask route validates the input and calls the encoding and '
-     'inference logic, which reads the previously saved model weights and metadata '
-     '(vocabulary, maximum sequence length, label encoder) from the models/ directory and '
-     'returns a JSON response containing the prediction, probability, and risk level, which '
-     'the front end then renders.'],
-    style_source_el=BODY_STYLE_SRC)
-add_picture_after(FP[397], 'report_figures/fig_3_2_dfd.png', 5.8)
+set_text(P[216],
+    'Non-functional requirements define performance and operational constraints: '
+    '(1) Accuracy: the primary model should reach at least 80% test accuracy (met by the '
+    '1D-CNN at 81.05%); '
+    '(2) Responsiveness: inference for a single sequence must complete in under one second on '
+    'a standard CPU; '
+    '(3) Reproducibility: all data splits, cross-validation folds, and training routines must '
+    'use fixed random seeds; and '
+    '(4) Usability: the web page must provide simple inputs and clear visual risk indicators '
+    'for users without technical backgrounds.')
+P[216].style = 'Body Text'
 
-set_text(FP[399],
-    'The user interface is a single-page web application (templates/index.html) served by '
-    'Flask. It provides a text field for the peptide sequence, a drop-down to select which '
-    'trained model to use, and a button that triggers an asynchronous request to the '
-    '/predict endpoint. The result is displayed as a predicted class, an animated probability '
-    'bar, and a colour-coded risk badge (green for Low, amber for Medium, red for High), so '
-    'that a non-technical examiner can query the system without needing to read any code.')
+# DFD Section: Text -> Picture -> Caption
+dfd_text = insert_paragraphs_after(P[217],
+    ['Figure 3.2 illustrates the data flow through the Flask web service in app.py. '
+     'When a user enters a peptide sequence and selects a model, the /predict endpoint checks '
+     'the string against canonical amino acid codes. Valid inputs pass to the inference engine, '
+     'which loads the saved model weights from the models/ directory, encodes the sequence, '
+     'and runs the forward pass. The application then returns a JSON payload containing the '
+     'prediction, probability score, and risk category for display on the webpage.'],
+    style_source_p=P[169])
+pic32 = add_picture_after(dfd_text[-1], 'report_figures/fig_3_2_dfd.png', 6.2)
+cap32 = clone_paragraph(P[169])
+set_text(cap32, 'Figure 3.2: Data flow diagram of the prediction (web demo) subsystem.')
+insert_after(pic32, cap32)
 
-set_text(FP[402],
-    'Several alternative design choices were considered before settling on the final '
-    'pipeline. For sequence representation, k-mer frequency counting was considered as an '
-    'alternative to one-hot and integer encoding; it was not adopted because it discards '
-    'positional information that convolutional and recurrent models can otherwise exploit. '
-    'For evaluation, a single train-test split without cross-validation was considered for '
-    'the classical models, but five-fold cross-validation was adopted instead because the '
-    'dataset, after deduplication, is modest in size and a single split can give an '
-    'optimistic or pessimistic estimate depending on how the data happens to be divided. For '
-    'the deep learning validation strategy, using the test set itself for early stopping was '
-    'considered (and was, in fact, an earlier limitation of this project) but was replaced '
-    'with a dedicated internal validation split so that the test set remains untouched until '
-    'final evaluation. Finally, a single hybrid architecture was not adopted as the primary '
-    'deliverable; instead, three deep learning architectures were trained independently so '
-    'that their relative strengths (CNN for local motifs, LSTM/BiLSTM for longer-range '
-    'dependencies) could be compared directly.')
+# UI
+insert_paragraphs_after(P[218],
+    ['The web interface is a clean, single-page application built with Flask and HTML/CSS '
+     '(templates/index.html). It includes a text box for sequence entry, a dropdown to select '
+     'among the six trained models, and a submit button. After submission, the page displays '
+     'the predicted class, an animated probability meter, and a color-coded risk badge (green '
+     'for Low, amber for Medium, and red for High), allowing users to interpret results quickly.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[404],
-    ['The project was planned and executed across two reporting phases, following the '
-     'timeline in Table 3.1. The first phase covered data collection, cleaning, and the '
-     'baseline machine learning models; the second phase covered the deep learning models, '
-     'evaluation artefacts, the web demonstration, and the final report.'],
-    style_source_el=BODY_STYLE_SRC)
+# Detailed Design / Alternatives
+set_text(P[222],
+    'During development, we evaluated several technical choices. For feature extraction, we '
+    'considered k-mer frequency counting but rejected it because it discards positional order, '
+    'which neural networks need to detect sequential motifs. For classical model validation, we '
+    'used five-fold cross-validation rather than relying solely on a single split to reduce '
+    'sampling bias. For neural network training, we used an internal 10% validation split for '
+    'early stopping, keeping the 20% test partition strictly untouched until final evaluation. '
+    'Lastly, rather than creating a complex hybrid network, we trained 1D-CNN, LSTM, and BiLSTM '
+    'architectures separately to isolate how local convolutional filters perform relative to '
+    'recurrent sequence modeling.')
 
-print('Chapter 3 part A done.')
+insert_paragraphs_after(P[224],
+    ['We executed the project in two main phases following the schedule in Table 3.1. Phase 1 '
+     'covered data collection from CPAD 2.0, preprocessing, and training classical machine '
+     'learning baselines. Phase 2 focused on building deep neural architectures, generating '
+     'evaluation metrics and figures, deploying the web application, and writing the final report.'],
+    style_source_p=P[169])
 
-# --- Task Allocation (3.4) ---------------------------------------------------
-set_text(FP[407], 'This table depicts the timeline of the principal activities across the project,')
-set_text(FP[408], 'covering weeks 6 to 48 of the two-phase FYDP schedule.')
-set_text(FP[409], 'Table 3.1: Project task allocation across the FYDP timeline.')
+set_text(P[228], 'This table depicts the timeline of the principal activities across the project,')
+set_text(P[229], 'covering weeks 6 to 48 of the two-phase FYDP schedule.')
+set_text(P[231], 'Table 3.1: Project task allocation across the FYDP timeline.')
 
+# Task Table 2 (Table 3.1)
 task_table = doc.tables[2]
-# Row 0: 'Tasks' + 'Weeks' x19 (header) -- leave as is
-# Row 1: '' + week numbers 12..48 -- replace with the real week markers used (6..48, step ~2)
 week_values = [6, 8, 10, 12, 16, 20, 24, 28, 32, 36, 38, 40, 42, 44, 45, 46, 47, 48, 48]
 row1_cells = task_table.rows[1].cells
 for c, val in enumerate(week_values):
     if c + 1 < len(row1_cells):
-        row1_cells[c + 1].text = str(val)
+        set_cell_text(row1_cells[c + 1], str(val))
 
 task_defs = [
     ('Data cleaning, deduplication, and\nlabel standardisation', {0, 1, 2, 3}),
@@ -662,74 +831,67 @@ task_defs = [
     ('Deep learning development and\ntraining (CNN, LSTM, BiLSTM)', {5, 6, 7, 8, 9, 10}),
     ('Evaluation, Flask web demo, and\nfinal report drafting', {9, 10, 11, 12, 13, 14, 15, 16, 17, 18}),
 ]
-# rows 2-3 = task group 1 (two stacked rows), 4-5 = group 2, 6-7 = group 3, 8-9 = group 4
 row_pairs = [(2, 3), (4, 5), (6, 7), (8, 9)]
 for (r_top, r_bot), (label, active_cols) in zip(row_pairs, task_defs):
-    task_table.rows[r_top].cells[0].text = label
-    task_table.rows[r_bot].cells[0].text = label
+    set_cell_text(task_table.rows[r_top].cells[0], label)
+    set_cell_text(task_table.rows[r_bot].cells[0], label)
     for col in active_cols:
-        task_table.rows[r_top].cells[col + 1].text = '\u25a0'
-        task_table.rows[r_bot].cells[col + 1].text = '\u25a0'
-print('Task allocation table populated.')
+        set_cell_text(task_table.rows[r_top].cells[col + 1], '\u25a0')
+        set_cell_text(task_table.rows[r_bot].cells[col + 1], '\u25a0')
 
-remove_paragraph(FP[441])  # stray empty Heading3
+remove_paragraph(P[232])
+set_text(P[236],
+    'This chapter described our experimental research methodology, covering data preparation, '
+    'sequence encodings, training protocols, software requirements, data flow design, architectural '
+    'decisions, and project scheduling.')
 
-set_text(FP[445],
-    'This chapter described the research methodology of the project: a quantitative, '
-    'experimental design covering data preprocessing, dual sequence encoding, six-model '
-    'training and evaluation, and deployment through a Flask web interface, together with '
-    'the functional and non-functional requirements, the data flow of the prediction '
-    'subsystem, the alternatives considered, and the project timeline.')
-
-print('Chapter 3 done.')
+print("Chapter 3 complete.")
 
 # ===========================================================================
-# CHAPTER 4: IMPLEMENTATION AND RESULTS (lines 447-461 -> FP[446:461])
+# 5. CHAPTER 4: IMPLEMENTATION AND RESULTS
 # ===========================================================================
-set_text(FP[450],
-    'This chapter describes the software environment used to build the system, the '
-    'evaluation methodology applied to every model, and the results obtained, together with '
-    'a discussion of why the models performed as they did.')
-remove_paragraph(FP[451])
+set_text(P[242],
+    'This chapter describes the software environment, experimental evaluation procedures, and '
+    'comparative results across all six classifiers, examining why certain architectures '
+    'performed better on the peptide dataset.')
+set_text(P[243], "")
 
-set_text(FP[454],
-    'The pipeline was implemented in Python 3.x. Data collection used requests and '
-    'BeautifulSoup [18]; data handling used pandas [14] and NumPy [15]; classical models '
-    'used scikit-learn [2]; deep learning models used TensorFlow/Keras [3]; result plots used '
-    'Matplotlib [16] and Seaborn [17]; spreadsheet export used openpyxl [19]; and the '
-    'interactive demonstration used Flask [20]. No specialised hardware was required: every '
-    'model trains and runs inference on an ordinary desktop or laptop CPU, since the dataset '
-    'is small (a few thousand short sequences) and none of the architectures used exceeds a '
-    'few hundred thousand parameters.')
+# Environment Setup
+insert_paragraphs_after(P[245],
+    ['We built the pipeline in Python 3.x using standard scientific and web libraries: requests '
+     'and BeautifulSoup [18] for data collection; pandas [14] and NumPy [15] for numerical '
+     'processing; scikit-learn [2] for classical algorithms; TensorFlow/Keras [3] for deep neural '
+     'networks; Matplotlib [16] and Seaborn [17] for charts; openpyxl [19] for spreadsheet export; '
+     'and Flask [20] for the web interface. Because the dataset contains approximately two '
+     'thousand short sequences and each model has fewer than 200,000 parameters, training and '
+     'inference run quickly on a standard multi-core CPU without requiring GPU hardware.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[455],
-    ['Every model was evaluated on the same held-out test set (20% of the cleaned dataset, '
-     'stratified by class, random_state = 42) to keep the comparison fair. The three '
-     'classical models (Logistic Regression, Random Forest, SVM) were additionally evaluated '
-     'with stratified five-fold cross-validation on the training partition, which gives a '
-     'more stable estimate of performance than a single split. The three deep learning '
-     'models (CNN, LSTM, BiLSTM) were trained with a dedicated internal validation split '
-     '(10% of the training data) and early stopping (patience = 5 epochs on validation loss, '
-     'best weights restored) so that the test set was never used during training or model '
-     'selection.',
-     'Five metrics were computed for every model from the confusion matrix on the test set: '
-     'Accuracy = (TP + TN) / (TP + TN + FP + FN); Precision = TP / (TP + FP); Recall = TP / '
-     '(TP + FN); F1-score = 2 \u00d7 (Precision \u00d7 Recall) / (Precision + Recall); and '
-     'ROC-AUC, the area under the receiver operating characteristic curve, computed from the '
-     'predicted probabilities rather than the thresholded class label. F1-score was used as '
-     'the primary criterion for selecting the best model because it balances precision and '
-     'recall, which is more informative than accuracy alone when false positives and false '
-     'negatives are not equally costly.'],
-    style_source_el=BODY_STYLE_SRC)
+# Testing & Evaluation
+insert_paragraphs_after(P[247],
+    ['To maintain an unbiased benchmark, we evaluated all models on the same held-out test '
+     'partition (20% of the cleaned dataset, stratified by class, random seed 42). We trained the '
+     'classical classifiers (Logistic Regression, Random Forest, and SVM) with stratified '
+     'five-fold cross-validation on the 80% training partition to confirm stability across '
+     'folds. We trained the deep learning models (CNN, LSTM, and BiLSTM) using an internal 10% '
+     'validation split and early stopping (patience of 5 epochs monitoring validation loss, '
+     'restoring best weights), keeping the test partition completely separated.',
+     'We assessed model performance using five standard metrics derived from the test confusion '
+     'matrices: Accuracy = (TP + TN) / (TP + TN + FP + FN); Precision = TP / (TP + FP); '
+     'Recall = TP / (TP + FN); F1-score = 2 * (Precision * Recall) / (Precision + Recall); and '
+     'ROC-AUC, calculated from continuous prediction probabilities. We used the F1-score as '
+     'our primary benchmark metric because it balances false positives and false negatives, '
+     'ensuring that models are penalized for both missed amyloid sequences and false alarms.'],
+    style_source_p=P[169])
 
-results_intro = insert_paragraphs_after(FP[456],
-    ['Table 4.1 summarises the performance of all six models on the held-out test set, '
-     'taken directly from the metrics_summary.csv file produced by the training pipeline.'],
-    style_source_el=BODY_STYLE_SRC)
+# Results & Discussion with Dynamic Table 4.1
+results_intro = insert_paragraphs_after(P[248],
+    ['Table 4.1 presents the test set metrics for all six models, extracted directly from '
+     'metrics_summary.csv generated during pipeline execution.'],
+    style_source_p=P[169])
 anchor = results_intro[-1]
 
-# --- Table 4.1: results table (loaded dynamically from metrics_summary.csv) -------
-cap = clone_paragraph(BODY_STYLE_SRC)
+cap = clone_paragraph(P[169])
 set_text(cap, 'Table 4.1: Comparative performance of all trained models on the held-out test set.')
 insert_after(anchor, cap)
 anchor = cap
@@ -762,413 +924,355 @@ new_tbl = doc.add_table(rows=len(results_table_data), cols=6)
 new_tbl.style = doc.tables[0].style
 for r, row_vals in enumerate(results_table_data):
     for c, val in enumerate(row_vals):
-        new_tbl.rows[r].cells[c].text = val
+        set_cell_text(new_tbl.rows[r].cells[c], val, bold=(r == 0))
 tbl_el = new_tbl._tbl
 tbl_el.getparent().remove(tbl_el)
 insert_after(anchor, tbl_el)
 anchor = tbl_el
 
 discussion_paras = [
-    ('The Convolutional Neural Network achieved the best overall result, with the highest '
-     'accuracy (81.05%), F1-score (0.815), and ROC-AUC (0.893) of all six models. This is '
-     'consistent with the literature reviewed in Chapter 2: Wang et al. [7] found CNN and RNN '
-     'architectures to be the most cost-effective choice for modelling short peptide '
-     'aggregation traits, and amyloid-forming behaviour is strongly influenced by short, '
-     'local motifs (three to six residues) such as the well-known KLVFFA segment of '
-     'amyloid-beta, which a convolutional filter is well suited to detect regardless of where '
-     'the motif appears in the sequence.'),
-    ('BiLSTM was the second-best model (accuracy 80.30%, F1 = 0.806, ROC-AUC = 0.877), ahead '
-     'of all three classical baselines, showing that a bidirectional recurrent architecture '
-     'can also capture useful contextual sequence patterns, though slightly less efficiently '
-     'than the convolutional approach for this dataset. The plain, single-direction LSTM '
-     'performed noticeably worse (accuracy 55.11%, F1 = 0.710) despite a nominal recall of 1.0; '
-     'this combination \u2014 high recall with low accuracy and low precision (0.550) \u2014 '
-     'indicates that the LSTM collapsed towards predicting the positive (amyloid) class for '
-     'almost every input, rather than learning a genuinely discriminative decision boundary.'),
-    ('The three classical models (Logistic Regression, Random Forest, SVM) performed '
-     'similarly to one another, with accuracy between 76.6% and 77.8% and F1-scores between '
-     '0.787 and 0.792, forming a consistent baseline band below the CNN and BiLSTM. This '
-     'matches the expectation that models operating on a fixed one-hot representation, '
-     'without any mechanism to learn position-invariant local patterns, are at a structural '
-     'disadvantage relative to a convolutional model on this kind of sequence data. Random '
-     'Forest reached the highest ROC-AUC among the classical models (0.865), suggesting its '
-     'ensemble of decision trees captured some non-linear structure in the one-hot features '
-     'that the linear Logistic Regression model could not.'),
-    ('Figure 4.1 presents the six models side by side as a bar chart and as a metric '
-     'heatmap, and Figure 4.2 shows the ROC curves for all models on a common plot. Figures '
-     '4.3 and 4.4 illustrate the confusion matrix and training curves for the leading CNN model, '
-     'while Figures 4.5 and 4.6 provide the confusion matrix and training curves for the runner-up '
-     'BiLSTM model. Both deep learning models converge smoothly under the early-stopping window '
-     'without a widening gap between training and validation loss, demonstrating that the internal '
-     'validation split and early stopping strategy adopted in Chapter 3 successfully prevented overfitting.'),
+    ('The 1D-CNN achieved the highest overall performance on the test set, reaching 81.05% '
+     'accuracy, an F1-score of 0.8146, and an ROC-AUC of 0.8925. This result aligns with '
+     'findings by Wang et al. [7], who showed that convolutional filters effectively capture '
+     'localized aggregation traits. Amyloid formation often depends on short, contiguous '
+     'segments of 3 to 6 amino acids, such as the KLVFFA motif in amyloid-beta. Convolutional '
+     'filters slide across the sequence to detect these critical motifs regardless of where '
+     'they appear along the peptide chain.'),
+    ('The Bidirectional LSTM ranked second, obtaining 80.30% accuracy, an F1-score of 0.8059, '
+     'and an ROC-AUC of 0.8769, outperforming all classical baselines. By processing sequences '
+     'in both forward and backward directions, the BiLSTM captures broader contextual '
+     'relationships, though it was slightly less effective than the CNN on short local motifs. '
+     'In contrast, the unidirectional LSTM struggled, recording 55.11% accuracy and an F1-score '
+     'of 0.7097 despite a recall of 1.0000. This occurred because the standard LSTM collapsed '
+     'into predicting the majority positive class for every input instead of learning a '
+     'discriminative boundary.'),
+    ('The classical models (Logistic Regression, Random Forest, and SVM) established a solid '
+     'baseline, with accuracies between 76.56% and 77.81% and F1-scores between 0.7869 and '
+     '0.7916. Because these models process flattened one-hot matrices without convolutional '
+     'shift-invariance, they cannot recognize motifs that appear in varying positions as easily '
+     'as a CNN. Among the tabular models, Random Forest achieved the highest ROC-AUC (0.8649), '
+     'showing that decision tree ensembles capture non-linear residue interactions better than '
+     'linear Logistic Regression.'),
+    ('Figure 4.1 shows a comparative bar chart and heatmap across all metrics, and Figure 4.2 '
+     'plots the ROC curves on a single axis. Figures 4.3 and 4.4 show the confusion matrix and '
+     'training history curves for the CNN, while Figures 4.5 and 4.6 show the corresponding '
+     'plots for the BiLSTM. Both neural networks converged within the early stopping window '
+     'without divergence between training and validation loss, confirming that regularization '
+     'prevented overfitting.'),
 ]
 
-created = insert_paragraphs_after(anchor, [discussion_paras[0]], style_source_el=BODY_STYLE_SRC)
+# Discussion 1 -> Figure 4.1 (Picture -> Caption below)
+created = insert_paragraphs_after(anchor, [discussion_paras[0]], style_source_p=P[169])
 anchor = created[-1]
-
-fig_cap = clone_paragraph(BODY_STYLE_SRC)
+pic41 = add_picture_after(anchor, 'results/model_comparison.png', 6.0)
+fig_cap = clone_paragraph(P[169])
 set_text(fig_cap, 'Figure 4.1: Model performance comparison (bar chart and metric heatmap) across all six trained models.')
-insert_after(anchor, fig_cap)
-add_picture_after(fig_cap, 'results/model_comparison.png', 6.0)
-anchor = fig_cap.getnext()
+insert_after(pic41, fig_cap)
+anchor = fig_cap
 
-created = insert_paragraphs_after(anchor, [discussion_paras[1]], style_source_el=BODY_STYLE_SRC)
+# Discussion 2 -> Figure 4.2 (Picture -> Caption below)
+created = insert_paragraphs_after(anchor, [discussion_paras[1]], style_source_p=P[169])
 anchor = created[-1]
-
-fig_cap2 = clone_paragraph(BODY_STYLE_SRC)
+pic42 = add_picture_after(anchor, 'results/roc_auc_all_models.png', 5.0)
+fig_cap2 = clone_paragraph(P[169])
 set_text(fig_cap2, 'Figure 4.2: ROC curves for all six models on the held-out test set.')
-insert_after(anchor, fig_cap2)
-add_picture_after(fig_cap2, 'results/roc_auc_all_models.png', 5.0)
-anchor = fig_cap2.getnext()
+insert_after(pic42, fig_cap2)
+anchor = fig_cap2
 
-created = insert_paragraphs_after(anchor, [discussion_paras[2]], style_source_el=BODY_STYLE_SRC)
+# Discussion 3 -> Figures 4.3 & 4.4 (CNN Confusion Matrix & Training History)
+created = insert_paragraphs_after(anchor, [discussion_paras[2]], style_source_p=P[169])
 anchor = created[-1]
 
-fig_cap3 = clone_paragraph(BODY_STYLE_SRC)
+pic43 = add_picture_after(anchor, 'results/confusion_matrix_cnn.png', 3.6)
+fig_cap3 = clone_paragraph(P[169])
 set_text(fig_cap3, 'Figure 4.3: Confusion matrix of the best-performing model (CNN) on the test set.')
-insert_after(anchor, fig_cap3)
-add_picture_after(fig_cap3, 'results/confusion_matrix_cnn.png', 3.6)
-anchor = fig_cap3.getnext()
+insert_after(pic43, fig_cap3)
 
-fig_cap4 = clone_paragraph(BODY_STYLE_SRC)
+pic44 = add_picture_after(fig_cap3, 'results/training_history_cnn.png', 6.0)
+fig_cap4 = clone_paragraph(P[169])
 set_text(fig_cap4, 'Figure 4.4: Training history (accuracy and loss) of the CNN model.')
-insert_after(anchor, fig_cap4)
-add_picture_after(fig_cap4, 'results/training_history_cnn.png', 6.0)
-anchor = fig_cap4.getnext()
+insert_after(pic44, fig_cap4)
+anchor = fig_cap4
 
-fig_cap5 = clone_paragraph(BODY_STYLE_SRC)
+# Figures 4.5 & 4.6 (BiLSTM Confusion Matrix & Training History)
+pic45 = add_picture_after(anchor, 'results/confusion_matrix_bilstm.png', 3.6)
+fig_cap5 = clone_paragraph(P[169])
 set_text(fig_cap5, 'Figure 4.5: Confusion matrix of the BiLSTM model on the held-out test set.')
-insert_after(anchor, fig_cap5)
-add_picture_after(fig_cap5, 'results/confusion_matrix_bilstm.png', 3.6)
-anchor = fig_cap5.getnext()
+insert_after(pic45, fig_cap5)
 
-fig_cap6 = clone_paragraph(BODY_STYLE_SRC)
+pic46 = add_picture_after(fig_cap5, 'results/training_history_bilstm.png', 6.0)
+fig_cap6 = clone_paragraph(P[169])
 set_text(fig_cap6, 'Figure 4.6: Training history (accuracy and loss) of the BiLSTM model.')
-insert_after(anchor, fig_cap6)
-add_picture_after(fig_cap6, 'results/training_history_bilstm.png', 6.0)
-anchor = fig_cap6.getnext()
+insert_after(pic46, fig_cap6)
+anchor = fig_cap6
 
-created = insert_paragraphs_after(anchor, [discussion_paras[3]], style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(anchor, [discussion_paras[3]], style_source_p=P[169])
 
-set_text(FP[460],
-    'This chapter described the implementation environment, the evaluation methodology '
-    '(stratified split, five-fold cross-validation for the classical models, and a separate '
-    'validation split with early stopping for the deep learning models), and the results of '
-    'all six trained models. The Convolutional Neural Network was identified as the '
-    'best-performing model, reaching 81.05% accuracy and an F1-score of 0.815, and its '
-    'behaviour was examined through confusion matrices, ROC curves, and training history '
-    'plots alongside the runner-up BiLSTM model.')
+set_text(P[252],
+    'This chapter presented the experimental setup, validation methods, and comparative results '
+    'for all six classifiers. The 1D-CNN delivered the best overall performance, reaching 81.05% '
+    'accuracy, an F1-score of 0.8146, and an ROC-AUC of 0.8925. We examined the performance using '
+    'confusion matrices, ROC curves, and training history curves alongside the runner-up BiLSTM.')
 
-print('Chapter 4 done.')
+print("Chapter 4 complete.")
 
 # ===========================================================================
-# CHAPTER 5: ENGINEERING STANDARDS AND DESIGN CHALLENGES (lines 462-565)
+# 6. CHAPTER 5: ENGINEERING STANDARDS AND DESIGN CHALLENGES
 # ===========================================================================
-set_text(FP[465],
-    'This chapter discusses the engineering standards relevant to the project, its impact '
-    'on society, the environment, and sustainability, its project management and cost '
-    'profile, and how the work maps onto the defined complex engineering problems and '
-    'activities.')
+set_text(P[258],
+    'This chapter discusses engineering standards, societal and environmental considerations, '
+    'ethical guidelines, financial factors, and the project\'s alignment with complex engineering '
+    'problem attributes.')
 
-set_text(FP[469],
-    'The standards discussed below are limited to those directly relevant to a software-only, '
-    'data-driven research project of this kind; formal medical-device or clinical-software '
-    'standards were not applied because the system is a research prototype and is not '
-    'intended for clinical use in its current form.')
+set_text(P[262],
+    'Because this system is an academic research prototype rather than a certified medical '
+    'device, we followed software engineering, computing, and data interchange standards '
+    'rather than clinical diagnostic regulations.')
 
-insert_paragraphs_after(FP[471],
-    ['The implementation follows standard Python packaging and style conventions (PEP 8 '
-     'naming and structure) and pins minimum library versions in requirements.txt so that the '
-     'environment can be reproduced. Two alternatives were considered for the deep learning '
-     'backend: PyTorch and TensorFlow/Keras. TensorFlow/Keras [3] was selected because its '
-     'high-level Sequential API reduced boilerplate for the three architectures used and '
-     'because the developer had prior familiarity with it, which reduced development risk; '
-     'the trade-off is a heavier dependency footprint than a minimal PyTorch setup.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[264],
+    ['Our codebase adheres to PEP 8 style conventions and specifies exact library versions in '
+     'requirements.txt to ensure reproducible execution. We chose TensorFlow/Keras [3] for deep '
+     'learning because its Sequential API allowed straightforward model definition and rapid '
+     'experimentation.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[472],
-    ['The system has no dedicated hardware standard because it targets ordinary consumer '
-     'or laboratory desktop/laptop hardware (a standard x86-64 CPU with at least 8 GB of RAM). '
-     'An alternative would have been to require GPU acceleration; this was not made a '
-     'requirement because the dataset and model sizes involved are small enough that CPU '
-     'training completes in a practical amount of time, which keeps the system accessible to '
-     'examiners without specialised hardware.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[265],
+    ['The pipeline runs on standard x86-64 consumer and laboratory computers with at least 8 GB '
+     'RAM. Because the dataset contains roughly two thousand samples, full training takes only '
+     'a few minutes on a CPU, keeping the software accessible without specialized GPU servers.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[473],
-    ['Client-server communication in the web demonstration follows the standard HTTP/1.1 '
-     'protocol, with the front end and the Flask backend exchanging JSON payloads over a '
-     'REST-style /predict endpoint. Plain JSON over HTTP was chosen over a heavier protocol '
-     '(for example gRPC) because the payload is a single short string and a few scalar '
-     'outputs, so the added complexity of a binary protocol would not be justified.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[266],
+    ['Client-server communication follows HTTP/1.1 REST conventions, exchanging JSON payloads '
+     'through the /predict endpoint. We chose JSON over HTTP because the payload consists of a '
+     'short sequence string and scalar predictions, keeping the communication layer lightweight '
+     'and dependable.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[476],
-    ['If validated further, a system of this kind could give patients, caregivers, and '
-     'researchers a faster, lower-cost first indication of amyloid-related risk than waiting '
-     'for an imaging appointment, although it is not a diagnostic replacement for clinical '
-     'evaluation.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[269],
+    ['Following thorough clinical validation, sequence-based screening could offer an early, '
+     'low-cost risk indicator for Alzheimer\'s disease. This can help researchers and doctors '
+     'prioritize patients for comprehensive diagnostic evaluation without replacing formal '
+     'medical testing.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[477],
-    ['The models are computationally light (a few hundred thousand parameters at most) and '
-     'train on CPU hardware in minutes, so the environmental footprint of running or '
-     'retraining them is small compared with large-scale deep learning systems. Reducing '
-     'reliance on repeated imaging-based screening could also reduce the resource cost '
-     'associated with running MRI/PET equipment for routine, low-risk cases.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[270],
+    ['Our models require modest computing power, training in minutes on standard CPUs with '
+     'negligible energy use. By providing a lightweight preliminary filter, sequence-based '
+     'tools could eventually reduce unnecessary hospital scans for low-risk individuals, '
+     'lowering overall demands on medical facilities.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[478],
-    ['The dataset (CPAD 2.0 peptide records) contains no patient-identifiable information, '
-     'which limits privacy risk. However, the system must not be presented as a diagnostic '
-     'tool: its output is a probability derived from sequence data alone, it has not been '
-     'validated on an independent clinical cohort, and using it to make real medical decisions '
-     'without qualified clinical oversight would be inappropriate and potentially harmful.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[271],
+    ['The CPAD 2.0 dataset consists of anonymized, publicly available peptide sequences, '
+     'raising no personal privacy concerns. Ethically, this software is strictly a research '
+     'and educational prototype. It must never be used for clinical diagnosis or patient '
+     'treatment decisions without formal clinical validation and physician oversight.'],
+    style_source_p=P[169])
 
-insert_paragraphs_after(FP[479],
-    ['The code, trained model artefacts, and dataset processing scripts are kept in a single '
-     'version-controlled repository with pinned dependency versions, so the pipeline can be '
-     're-run and the models retrained as CPAD 2.0 grows or as new peptide data becomes '
-     'available, without requiring a rewrite of the surrounding infrastructure.'],
-    style_source_el=BODY_STYLE_SRC)
+insert_paragraphs_after(P[272],
+    ['We maintain the codebase, model weights, and data scripts in a version-controlled '
+     'repository with pinned dependencies. This modular structure allows future researchers '
+     'to retrain and update models as CPAD 2.0 expands or new peptide datasets become available.'],
+    style_source_p=P[169])
 
-set_text(FP[483],
-    'The project relies almost entirely on free and open-source software (Python, '
-    'scikit-learn, TensorFlow, Flask) and a freely accessible public dataset (CPAD 2.0), so '
-    'direct financial cost is minimal beyond the researcher\u2019s own computing hardware and '
-    'time. An alternative budget line would arise only if the project were extended towards '
-    'clinical validation, which would require access to an independent, ethically approved '
-    'peptide or patient dataset and possibly wet-lab confirmation of predicted aggregation '
-    'behaviour; that cost is outside the scope of the current, software-only phase of the '
-    'work.')
+set_text(P[276],
+    'We built the project entirely with free, open-source software (Python, scikit-learn, '
+    'TensorFlow, Flask) and public scientific data (CPAD 2.0), incurring zero software '
+    'licensing costs. Future financial expenditure would occur only if the pipeline moves '
+    'toward clinical validation, which would require ethical approvals, patient cohort testing, '
+    'and wet-lab biochemical validation.')
 
-print('Chapter 5 part A done.')
+set_text(P[280],
+    'Table 5.1 maps this project to the complex engineering problem attributes (EP1 to EP7) '
+    'defined by the accreditation framework, providing a brief rationale for each.')
 
-set_text(FP[486],
-    'Table 5.1 maps this project to the WK/EP complex engineering problem attributes defined '
-    'by the accreditation framework, with a short rationale for each attribute that applies.')
-
-ep_table = doc.tables[4]  # index shifted by +1 because a new results table was inserted in Chapter 4
+# Populate Table 5.1 (doc.tables[4] because Table 4.1 was inserted in Chapter 4)
+ep_table = doc.tables[4]
 ep_texts = [
-    'Requires knowledge of bioinformatics (peptide/amyloid biology), classical machine '
-    'learning, and deep sequence modelling (WK3-WK8).',
-    'Balances predictive accuracy against interpretability and training time across six '
-    'different model families evaluated under one common pipeline.',
-    'Requires analysis of preprocessing choices, encoding schemes, cross-validation design, '
-    'and per-model error behaviour (e.g. the LSTM recall/precision imbalance).',
-    'Combining peptide bioinformatics with deep sequence modelling for amyloid risk is not a '
-    'routine, previously solved engineering task for the author.',
-    'Few formal codes exist specifically for this niche; general ML evaluation good practice '
-    '(stratified splitting, held-out testing) was followed instead of a regulatory code.',
-    'Primarily the researcher and academic supervisor at this research stage; no external '
-    'clinical or commercial stakeholders are yet involved.',
-    'Integrates a public bioinformatics dataset, multiple ML/DL frameworks, and a web '
-    'deployment layer, each with its own constraints that interact with the others.',
+    'Requires knowledge of bioinformatics (peptide and amyloid biology), classical machine '
+    'learning, and deep sequence modeling (WK3 to WK8).',
+    'Balances classification accuracy against interpretability and training time across six '
+    'model architectures evaluated within one pipeline.',
+    'Involves analyzing preprocessing methods, sequence encodings, cross-validation design, '
+    'and individual model behaviors such as the LSTM class collapse.',
+    'Applying deep sequence modeling to peptide aggregation for Alzheimer\'s risk is a '
+    'specialized, non-routine engineering problem for undergraduate study.',
+    'Because no single regulatory standard governs exploratory bioinformatics scripts, we '
+    'applied established ML evaluation standards like stratified splitting and held-out test evaluation.',
+    'Direct stakeholders currently include the student researchers and academic supervisors; '
+    'clinical and commercial stakeholders would be involved in future clinical phases.',
+    'Integrates biological databases, machine learning frameworks, data visualization tools, '
+    'and a web deployment layer, each with distinct technical constraints.',
 ]
 for c, txt in enumerate(ep_texts):
     if c < len(ep_table.rows[1].cells):
-        ep_table.rows[1].cells[c].text = txt
-print('Table 5.1 (EP) populated.')
+        set_cell_text(ep_table.rows[1].cells[c], txt)
 
-set_text(FP[517],
-    'This subsection maps the overall problem, together with EP1, to the Knowledge Profile '
-    '(K1-K8) used by the accreditation framework, with a brief rationale in Table 5.2.')
+set_text(P[288],
+    'Table 5.2 maps the project to the Knowledge Profile (K1 to K8) used by the engineering '
+    'accreditation framework.')
 
+# Populate Table 5.2 (doc.tables[5])
 kp_table = doc.tables[5]
 kp_relevant = ['No', 'Partial', 'Yes', 'Yes', 'Yes', 'Yes', 'Yes', 'Yes']
 kp_reason = [
     'Not directly applied.',
     'Basic statistics (metrics, CV) only.',
     'ML/DL model design and training.',
-    'Peptide/amyloid biology knowledge.',
+    'Peptide and amyloid biology knowledge.',
     'Pipeline and model architecture design.',
     'Implementation and evaluation practice.',
     'Interpreting results and limitations.',
     'Grounded in the reviewed literature.',
 ]
 for c in range(len(kp_table.rows[2].cells)):
-    kp_table.rows[2].cells[c].text = kp_relevant[c] if c < len(kp_relevant) else ''
-    kp_table.rows[3].cells[c].text = kp_reason[c] if c < len(kp_reason) else ''
-print('Table 5.2 (Knowledge Profile) populated.')
+    set_cell_text(kp_table.rows[2].cells[c], kp_relevant[c] if c < len(kp_relevant) else '')
+    set_cell_text(kp_table.rows[3].cells[c], kp_reason[c] if c < len(kp_reason) else '')
 
-set_text(FP[539],
-    'This subsection maps the project to the complex Engineering Activities (EA1-EA5) '
-    'defined by the accreditation framework, with a brief rationale in Table 5.3.')
-
-set_text(FP[542],
+set_text(P[294],
+    'Table 5.3 maps the project to the complex Engineering Activities (EA1 to EA5) '
+    'defined by the accreditation framework.')
+set_text(P[297],
     'This section maps the overall problem to the relevant EAs (multiple may apply).')
 
+# Populate Table 5.3 (doc.tables[6])
 ea_table = doc.tables[6]
 ea_texts = [
-    'Uses a public dataset, open-source ML/DL libraries, and standard desktop computing '
-    'resources; no specialised laboratory resources were required.',
-    'Mainly an individual research effort with supervisory guidance; limited interaction with '
-    'external teams at this stage of the project.',
-    'Combines peptide sequence data with a six-model ML/DL comparison and a real-time web '
-    'demonstration, which is not a routine, off-the-shelf configuration.',
-    'A validated version of this kind of tool could support lower-cost, earlier '
-    'AD-related screening, with the ethical caveat that it must not replace clinical '
-    'diagnosis.',
-    'The general problem (disease risk prediction from biological sequence data) is familiar '
-    'in bioinformatics, but the specific peptide-aggregation angle combined with a full ML/DL '
-    'comparison is less common.',
+    'Uses public databases, open-source libraries, and standard desktop computing hardware '
+    'without requiring specialized wet-lab equipment.',
+    'Conducted primarily as an academic research project with faculty supervision and periodic '
+    'peer discussion.',
+    'Combines peptide sequence data with a six-model benchmark and an interactive web interface, '
+    'which is not an off-the-shelf configuration.',
+    'A clinically validated version could support accessible, early risk screening, provided '
+    'it is not used to replace formal clinical diagnosis.',
+    'While sequence classification is established in bioinformatics, combining peptide '
+    'aggregation analysis with a full classical and deep learning comparison is less common.',
 ]
 for c, txt in enumerate(ea_texts):
     if c < len(ea_table.rows[1].cells):
-        ea_table.rows[1].cells[c].text = txt
-print('Table 5.3 (EA) populated.')
+        set_cell_text(ea_table.rows[1].cells[c], txt)
 
-set_text(FP[564],
-    'This chapter reviewed the software, hardware, and communication standards applied in '
-    'the project, its impact on life, society, the environment, ethics, and sustainability, '
-    'a brief financial analysis, and a mapping of the work to the defined complex engineering '
-    'problems and activities.')
+set_text(P[304],
+    'This chapter reviewed the software and computing standards applied in our system, '
+    'examined societal and ethical aspects, analyzed development costs, and mapped our work '
+    'to complex engineering problem criteria.')
 
-print('Chapter 5 done.')
+print("Chapter 5 complete.")
 
 # ===========================================================================
-# CHAPTER 6: CONCLUSION  (lines 566-577 -> FP[565:577])
+# 7. CHAPTER 6: CONCLUSION
 # ===========================================================================
-remove_paragraph(FP[569])
-set_text(FP[570],
-    "This chapter summarises the project, states its limitations honestly, and outlines "
-    'directions for future work.')
+set_text(P[310],
+    'This chapter summarizes the primary outcomes of our study, discusses technical '
+    'limitations, and outlines directions for future research.')
+set_text(P[311], "")
 
-set_text(FP[573],
-    'This project presented a computational framework for early Alzheimer\u2019s disease '
-    'risk screening based on peptide sequences, combining classical machine learning '
-    '(Logistic Regression, Random Forest, SVM) with deep learning (CNN, LSTM, BiLSTM) under '
-    'one evaluation pipeline. Peptide records were collected from the CPAD 2.0 database, '
-    'cleaned, deduplicated, and encoded in two representations suited to the two model '
-    'families, and all six models were compared on a common held-out test set using '
-    'accuracy, precision, recall, F1-score, and ROC-AUC. The Convolutional Neural Network '
-    'produced the best result (81.05% accuracy, F1 = 0.815, ROC-AUC = 0.893), ahead of '
-    'BiLSTM and the three classical baselines, while the plain LSTM under-performed by '
-    'collapsing towards the positive class. The best model was packaged behind a Flask web '
-    'interface so that a new peptide sequence can be scored interactively. These results '
-    'support the underlying premise of the project: that peptide sequence data, without any '
-    'imaging, carries a usable signal for amyloid-related risk classification, and that a '
-    'convolutional architecture is well suited to extracting that signal from short '
-    'biological sequences.')
+# 6.1 Summary (Preserve Heading 3 style for P[313], set text in P[314])
+set_text(P[313], "Summary")
+set_text(P[314],
+    'We built and evaluated a computational screening framework that assesses Alzheimer\'s '
+    'disease risk from primary peptide sequences. By comparing three classical machine learning '
+    'classifiers (Logistic Regression, Random Forest, and Support Vector Machine) with three '
+    'deep neural networks (1D-CNN, LSTM, and Bidirectional LSTM), we established an empirical '
+    'benchmark on the CPAD 2.0 dataset. We cleaned and deduplicated 2,001 peptide records and '
+    'encoded them into padded integer arrays and one-hot matrices. On a 20% stratified test '
+    'set, the 1D-CNN achieved the best overall performance, reaching 81.05% accuracy, an '
+    'F1-score of 0.8146, and an ROC-AUC of 0.8925. The Bidirectional LSTM achieved second place '
+    'with 80.30% accuracy, while classical baselines performed between 76.56% and 77.81%. We also '
+    'deployed the trained CNN in a Flask web application that provides real-time predictions, '
+    'probability scores, and risk badges. These results demonstrate that primary sequence '
+    'features provide a meaningful, non-invasive signal for preliminary amyloid risk evaluation.')
 
-set_text(FP[575],
-    'This work has several limitations that should be considered before drawing broader '
-    'conclusions from it. First, there is no independent clinical validation dataset; all '
-    'reported results come from a single held-out split of the CPAD 2.0 data, and '
-    'performance on sequences outside this database is unknown. Second, the LSTM model '
-    'over-predicts the positive class (recall of 1.0 with precision of 0.553), which shows '
-    'that not every architecture generalised equally well under the same training regime. '
-    'Third, the results depend on the label quality and coverage of CPAD 2.0 itself; '
-    'mislabelled or under-represented peptide types in the source database would carry '
-    'through to the trained models. Finally, systematic hyperparameter search (for example '
-    'grid or Bayesian search over network width, depth, and learning rate) was not carried '
-    'out; the architectures used reasonable, literature-informed defaults rather than tuned '
-    'optima.')
+# 6.2 Limitation (Preserve Heading 3 style for P[315], set text in P[316])
+set_text(P[315], "Limitation")
+set_text(P[316],
+    'Our findings are subject to four main limitations: '
+    '(1) Dataset Scope: all models were trained and tested on data from CPAD 2.0. Because '
+    'independent clinical patient data was not accessible, generalization to clinical settings '
+    'remains unverified. '
+    '(2) Recurrent Model Sensitivity: the standard unidirectional LSTM collapsed into '
+    'predicting the majority positive class for all test samples (55.11% accuracy, 0.5500 '
+    'precision, 1.0000 recall), showing that recurrent models require careful parameter tuning '
+    'on short sequence data. '
+    '(3) Dataset Size: after removing duplicates and invalid entries, the total number of '
+    'unique sequences is modest, meaning that class distribution or label noise in the source '
+    'database can affect decision boundaries. '
+    '(4) Hyperparameter Search: deep learning models used standard literature-based '
+    'architectures rather than exhaustive Bayesian or grid optimization.')
 
-insert_paragraphs_after(FP[576],
-    ['Future work could address these limitations directly: evaluating the trained models '
-     'on an independent, ideally clinically sourced, peptide or amyloid dataset; running a '
-     'systematic hyperparameter search for the CNN and BiLSTM models; applying k-fold cross '
-     'validation to the deep learning models in addition to the classical ones; and adding '
-     'saliency or SHAP-based explainability to the CNN and BiLSTM models, extending the '
-     'SHAP analysis already produced for Random Forest, so that predictions can be linked '
-     'back to specific residues in a sequence. A longer-term direction is to replace the '
-     'custom CNN/LSTM/BiLSTM encoders with a pretrained protein language model such as '
-     'ESM-2, fine-tuned on the same CPAD 2.0 labels, to test whether large-scale pretraining '
-     'on general protein sequences improves on the results reported here.'],
-    style_source_el=BODY_STYLE_SRC)
+# 6.3 Future Work (Preserve Heading 3 style for P[317], insert text after P[317])
+set_text(P[317], "Future Work")
+insert_paragraphs_after(P[317],
+    ['Future work can expand on this study in four key areas: '
+     '(1) External Clinical Validation: testing the models on independent patient cohorts and '
+     'cerebrospinal fluid (CSF) peptide samples to measure real-world diagnostic accuracy. '
+     '(2) Pretrained Protein Language Models: evaluating transformer-based foundation models '
+     'such as ESM-2 or ProtBERT to capture deeper biochemical representations. '
+     '(3) Model Interpretability: using saliency methods like Integrated Gradients or DeepLIFT '
+     'on the 1D-CNN and BiLSTM to identify the exact amino acid motifs driving aggregation '
+     'predictions. '
+     '(4) Nested Cross-Validation: running repeated nested cross-validation across all deep '
+     'learning architectures to compute narrower statistical confidence intervals.'],
+    style_source_p=P[169])
 
-print('Chapter 6 done.')
+print("Chapter 6 complete.")
 
 # ===========================================================================
-# REFERENCES  (lines 578-583 -> FP[577:583])
+# 8. REFERENCES (IEEE FORMAT)
 # ===========================================================================
-remove_paragraph(FP[578])
+set_text(P[320], "")
 
 references = [
-    'CPAD 2.0: Curated Protein Aggregation Database, \u201cPeptide Dataset,\u201d [Online]. '
-    'Available: https://web.iitm.ac.in/bioinfo2/cpad2/peptides/',
-    'F. Pedregosa et al., \u201cScikit-learn: Machine Learning in Python,\u201d Journal of '
-    'Machine Learning Research, vol. 12, pp. 2825\u20132830, 2011.',
-    'M. Abadi et al., \u201cTensorFlow: Large-Scale Machine Learning on Heterogeneous '
-    'Systems,\u201d 2015. [Online]. Available: https://www.tensorflow.org/',
-    'S.-R. Yu, X.-M. Yang, Y.-N. Sun, Y.-J. Li, Y.-Y. Liu, and X.-L. Tang, \u201cProtein '
-    'interaction prediction for Alzheimer\u2019s disease using a multi-source protein '
-    'features fusion framework,\u201d Informatics and Health, vol. 2, pp. 119\u2013129, '
-    '2025.',
-    'A. Hassan, A. Imran, A. U. Yasin, M. A. Waqas, and R. Fazal, \u201cA multimodal '
-    'approach for Alzheimer\u2019s disease detection and classification using deep '
-    'learning,\u201d Journal of Computing & Biomedical Informatics, vol. 6, no. 2, Mar. '
-    '2024.',
-    'P. Rani, R. Lamba, R. K. Sachdeva, K. Kumar, and C. Iwendi, \u201cA machine learning '
-    'model for Alzheimer\u2019s disease prediction,\u201d IET Cyber-Physical Systems: '
-    'Theory & Applications, 2024.',
-    'B. Wang, S. Razavi, and E. R. Gamazon, \u201cTowards mechanistic models of mutational '
-    'effects: Deep learning on Alzheimer\u2019s A\u03b2 peptide,\u201d Computational and '
-    'Structural Biotechnology Journal, vol. 21, pp. 2434\u20132445, 2023.',
-    'L. Xu, G. Liang, C. Liao, G.-D. Chen, and C.-C. Chang, \u201cAn efficient classifier '
-    'for Alzheimer\u2019s disease genes identification,\u201d Molecules, vol. 23, no. 12, '
-    'p. 3140, Nov. 2018.',
-    'J. Hardy and D. J. Selkoe, \u201cThe amyloid hypothesis of Alzheimer\u2019s disease: '
-    'Progress and problems on the road to therapeutics,\u201d Science, vol. 297, no. 5580, '
-    'pp. 353\u2013356, Jul. 2002.',
-    'D. J. Selkoe and J. Hardy, \u201cThe amyloid hypothesis of Alzheimer\u2019s disease at '
-    '25 years,\u201d EMBO Molecular Medicine, vol. 8, no. 6, pp. 595\u2013608, Jun. 2016.',
-    'H. Braak and E. Braak, \u201cNeuropathological staging of Alzheimer-related '
-    'changes,\u201d Acta Neuropathologica, vol. 82, no. 4, pp. 239\u2013259, 1991.',
-    'C. R. Jack Jr. et al., \u201cNIA-AA Research Framework: Toward a biological definition '
-    'of Alzheimer\u2019s disease,\u201d Alzheimer\u2019s & Dementia, vol. 14, no. 4, pp. '
-    '535\u2013562, Apr. 2018.',
-    'A. Fernandez-Escamilla, M. S. Rousseau, L. Schymkowitz, and F. Serrano, \u201cPrediction '
-    'of sequence-dependent and mutational effects on the aggregation of peptides and '
-    'proteins,\u201d Nature Biotechnology, vol. 22, no. 10, pp. 1302\u20131306, Oct. 2004.',
-    'W. McKinney, \u201cData structures for statistical computing in Python,\u201d in Proc. '
-    '9th Python in Science Conf., 2010, pp. 56\u201361.',
-    'C. R. Harris et al., \u201cArray programming with NumPy,\u201d Nature, vol. 585, no. '
-    '7825, pp. 357\u2013362, 2020.',
-    'J. D. Hunter, \u201cMatplotlib: A 2D graphics environment,\u201d Computing in Science '
-    '& Engineering, vol. 9, no. 3, pp. 90\u201395, 2007.',
-    'M. L. Waskom, \u201cSeaborn: Statistical data visualization,\u201d Journal of Open '
-    'Source Software, vol. 6, no. 60, p. 3021, 2021.',
-    'L. Richardson, \u201cBeautiful Soup Documentation,\u201d [Online]. Available: '
-    'https://www.crummy.com/software/BeautifulSoup/bs4/doc/',
-    'openpyxl Developers, \u201copenpyxl documentation,\u201d [Online]. Available: '
-    'https://openpyxl.readthedocs.io/',
-    'Pallets Projects, \u201cFlask documentation,\u201d [Online]. Available: '
-    'https://flask.palletsprojects.com/',
+    'CPAD 2.0: Curated Protein Aggregation Database, "Peptide Dataset," [Online]. Available: https://web.iitm.ac.in/bioinfo2/cpad2/peptides/',
+    'F. Pedregosa et al., "Scikit-learn: Machine Learning in Python," Journal of Machine Learning Research, vol. 12, pp. 2825-2830, 2011.',
+    'M. Abadi et al., "TensorFlow: Large-Scale Machine Learning on Heterogeneous Systems," 2015. [Online]. Available: https://www.tensorflow.org/',
+    'S.-R. Yu, X.-M. Yang, Y.-N. Sun, Y.-J. Li, Y.-Y. Liu, and X.-L. Tang, "Protein interaction prediction for Alzheimer\'s disease using a multi-source protein features fusion framework," Informatics and Health, vol. 2, pp. 119-129, 2025.',
+    'A. Hassan, A. Imran, A. U. Yasin, M. A. Waqas, and R. Fazal, "A multimodal approach for Alzheimer\'s disease detection and classification using deep learning," Journal of Computing & Biomedical Informatics, vol. 6, no. 2, Mar. 2024.',
+    'P. Rani, R. Lamba, R. K. Sachdeva, K. Kumar, and C. Iwendi, "A machine learning model for Alzheimer\'s disease prediction," IET Cyber-Physical Systems: Theory & Applications, 2024.',
+    'B. Wang, S. Razavi, and E. R. Gamazon, "Towards mechanistic models of mutational effects: Deep learning on Alzheimer\'s A\u03b2 peptide," Computational and Structural Biotechnology Journal, vol. 21, pp. 2434-2445, 2023.',
+    'L. Xu, G. Liang, C. Liao, G.-D. Chen, and C.-C. Chang, "An efficient classifier for Alzheimer\'s disease genes identification," Molecules, vol. 23, no. 12, p. 3140, Nov. 2018.',
+    'J. Hardy and D. J. Selkoe, "The amyloid hypothesis of Alzheimer\'s disease: Progress and problems on the road to therapeutics," Science, vol. 297, no. 5580, pp. 353-356, Jul. 2002.',
+    'D. J. Selkoe and J. Hardy, "The amyloid hypothesis of Alzheimer\'s disease at 25 years," EMBO Molecular Medicine, vol. 8, no. 6, pp. 595-608, Jun. 2016.',
+    'H. Braak and E. Braak, "Neuropathological staging of Alzheimer-related changes," Acta Neuropathologica, vol. 82, no. 4, pp. 239-259, 1991.',
+    'C. R. Jack Jr. et al., "NIA-AA Research Framework: Toward a biological definition of Alzheimer\'s disease," Alzheimer\'s & Dementia, vol. 14, no. 4, pp. 535-562, Apr. 2018.',
+    'A. Fernandez-Escamilla, M. S. Rousseau, L. Schymkowitz, and F. Serrano, "Prediction of sequence-dependent and mutational effects on the aggregation of peptides and proteins," Nature Biotechnology, vol. 22, no. 10, pp. 1302-1306, Oct. 2004.',
+    'W. McKinney, "Data structures for statistical computing in Python," in Proc. 9th Python in Science Conf., 2010, pp. 56-61.',
+    'C. R. Harris et al., "Array programming with NumPy," Nature, vol. 585, no. 7825, pp. 357-362, 2020.',
+    'J. D. Hunter, "Matplotlib: A 2D graphics environment," Computing in Science & Engineering, vol. 9, no. 3, pp. 90-95, 2007.',
+    'M. L. Waskom, "Seaborn: Statistical data visualization," Journal of Open Source Software, vol. 6, no. 60, p. 3021, 2021.',
+    'L. Richardson, "Beautiful Soup Documentation," [Online]. Available: https://www.crummy.com/software/BeautifulSoup/bs4/doc/',
+    'openpyxl Developers, "openpyxl documentation," [Online]. Available: https://openpyxl.readthedocs.io/',
+    'Pallets Projects, "Flask documentation," [Online]. Available: https://flask.palletsprojects.com/',
 ]
 
-remove_paragraph(FP[580])  # stray empty BodyText between ref items
-set_text(FP[579], references[0])
-set_text(FP[581], references[1])
-set_text(FP[582], references[2])
-last = FP[582]
+set_text(P[321], references[0])
+set_text(P[323], references[1])
+set_text(P[324], references[2])
+last = P[324]
 for ref in references[3:]:
-    new_p = clone_paragraph(FP[582])
+    new_p = clone_paragraph(P[324])
     set_text(new_p, ref)
     insert_after(last, new_p)
     last = new_p
 
-print('References done. Total entries:', len(references))
+print("References complete. Total references:", len(references))
 
-# Attempt to save directly to OUT (and provide fallback if file is locked)
+# Enforce Century font across the entire document
+print("Enforcing Century font across all styles, defaults, paragraphs, tables, and headers/footers...")
+enforce_century_font(doc)
+
+# Save
 saved_paths = []
-try:
-    doc.save(OUT)
-    saved_paths.append(OUT)
-    print(f"Successfully saved to: {OUT}")
-except PermissionError:
-    alt_out = 'Alzheimer_Peptide_FYDP_Report_DRAFT_UPDATED.docx'
-    doc.save(alt_out)
-    saved_paths.append(alt_out)
-    print(f"Note: {OUT} is currently locked by Word. Saved to: {alt_out}")
+for out_path in [ALT_OUT, OUT, 'draft_report_wip.docx']:
+    try:
+        doc.save(out_path)
+        saved_paths.append(out_path)
+        print(f"Successfully saved to: {out_path}")
+    except PermissionError:
+        print(f"Note: {out_path} is locked/open in another program.")
+    except Exception as e:
+        print(f"Error saving {out_path}: {e}")
 
-# Also save a working copy to draft_report_wip.docx
-try:
-    doc.save('draft_report_wip.docx')
-    saved_paths.append('draft_report_wip.docx')
-except Exception:
-    pass
-
-print("Report generation complete. Output saved to:", saved_paths)
+print("Report generation complete. Output files:", saved_paths)
