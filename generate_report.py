@@ -273,9 +273,8 @@ ABSTRACT = (
     '81.05% accuracy, an F1-score of 0.8146, and an ROC-AUC of 0.8925. The Bidirectional '
     'LSTM reached 80.30% accuracy, whereas classical classifiers scored between 76.56% and '
     '77.81%. We also packaged the trained CNN into a lightweight Flask web interface for live '
-    'sequence evaluation. These results demonstrate that primary sequence structure holds '
-    'measurable signal for initial amyloid risk assessment, offering a practical computational '
-    'step prior to clinical testing.'
+    'sequence evaluation. These results show that primary amino acid sequences carry '
+    'measurable signal for preliminary amyloid risk assessment before clinical testing.'
 )
 set_text(P[114], ABSTRACT)
 
@@ -467,23 +466,22 @@ print("Front matter complete.")
 # 2. CHAPTER 1: INTRODUCTION
 # ===========================================================================
 set_text(P[135],
-    'This chapter outlines the research problem, explains the clinical need for accessible '
+    'This chapter introduces the research problem, explains the need for accessible '
     'peptide screening, defines our technical objectives, and summarizes the structure of the report.')
 
 intro_p1 = (
-    "Alzheimer's disease is the most common cause of dementia worldwide. As the condition "
-    'progresses, it causes irreversible memory loss and cognitive decline, creating major '
-    'burdens for patients, families, and healthcare providers. Today, definitive clinical '
+    "Alzheimer's disease is the most common cause of dementia worldwide. As the disease "
+    'progresses, it causes irreversible memory loss and cognitive decline that place heavy '
+    'burdens on patients, families, and healthcare systems. Today, definitive clinical '
     'assessment combines cognitive testing with neuroimaging such as structural MRI and amyloid '
-    'PET scans. Although these imaging modalities are accurate, they require specialized hospital '
-    'facilities and high costs, and they typically identify abnormalities only after severe '
-    'neuronal loss has occurred.'
+    'PET scans. While brain scans are accurate, they are expensive, require specialized hospital '
+    'equipment, and usually detect damage only after substantial neuronal loss.'
 )
 intro_p2 = (
     'At the biochemical level, Alzheimer\'s disease is driven by the misfolding and '
     'aggregation of amyloid-beta (A\u03b2) peptides into oligomers and fibril deposits [9], [10]. '
     'Whether a peptide aggregates depends directly on its primary amino acid sequence. Because '
-    'sequence data can be analyzed computationally, machine learning models offer a direct way '
+    'sequence data can be processed computationally, machine learning models offer a way '
     'to estimate aggregation tendency without laboratory synthesis or hospital equipment. In '
     'this project, we train and evaluate six machine learning and deep learning models on '
     'verified peptide sequences from the CPAD 2.0 database [1] to classify sequences as '
@@ -496,11 +494,10 @@ set_text(P[143],
     'Routine population screening for Alzheimer\'s is currently impractical because clinical '
     'neuroimaging is too expensive and resource intensive. A computational model that operates '
     'directly on amino acid strings runs in milliseconds on regular computer hardware, making '
-    'it suitable for high-throughput initial screening. In research workflows, such a tool can '
-    'help bioinformaticians filter potential amyloid candidates before investing in costly '
-    'laboratory assays. In addition, evaluating both classical tabular algorithms and modern deep '
-    'neural architectures under identical validation conditions provides clear evidence regarding '
-    'which model designs capture sequence motifs most effectively.')
+    'it suitable for high-throughput initial screening. In research workflows, such a tool helps '
+    'bioinformaticians filter potential amyloid candidates before investing in costly laboratory '
+    'assays. Comparing classical algorithms with deep neural networks on identical data also '
+    'shows which architectures identify sequence motifs most effectively.')
 
 obj_p1 = (
     'The main objective of this study is to build and evaluate a reproducible computational '
@@ -533,9 +530,9 @@ set_text(P[151],
     'describes each stage in detail.')
 
 set_text(P[155],
-    'This project delivers an end-to-end software pipeline that processes raw peptide '
-    'sequences, trains multiple classifiers, and provides real-time predictions through an interactive web '
-    'interface. It also provides an empirical benchmark comparing classical and deep learning '
+    'This project delivers a complete pipeline that processes raw peptide '
+    'sequences, trains multiple classifiers, and serves real-time predictions through an interactive web '
+    'interface. It also establishes an empirical benchmark comparing classical and deep learning '
     'models on peptide aggregation data.')
 
 set_text(P[159],
@@ -559,11 +556,11 @@ set_text(P[165],
 
 bg_p1 = (
     'Alzheimer\'s disease is the leading cause of dementia among older adults. In the brain, '
-    'the disease triggers progressive loss of synapses and neurons, especially in regions '
-    'responsible for memory and cognition. Standard clinical diagnosis relies on cognitive tests '
-    'such as the MMSE along with structural MRI and PET scans. While effective, brain imaging '
-    'is expensive and requires hospital infrastructure, often detecting tissue changes only '
-    'after significant cognitive impairment has already developed.'
+    'the disease causes progressive synapse and neuron loss, particularly in areas supporting '
+    'memory and cognition. Standard clinical diagnosis pairs cognitive tests like the MMSE with '
+    'structural MRI and PET scans. While effective, neuroimaging requires hospital facilities, '
+    'costs thousands of dollars, and often detects structural changes only after noticeable '
+    'cognitive impairment appears.'
 )
 bg_p2 = (
     'At the molecular level, Alzheimer\'s pathology involves the self-assembly of amyloid-beta '
@@ -574,12 +571,12 @@ bg_p2 = (
     'inexpensive screening check before individuals undergo clinical neuroimaging.'
 )
 bg_p3 = (
-    'Prior bioinformatics studies demonstrate that primary sequence structure holds clear '
-    'diagnostic value for predicting peptide aggregation [8]. Deep learning architectures such '
-    'as 1D-CNNs and LSTMs can extract localized motifs and sequential dependencies directly '
-    'from text sequences without manual feature engineering [7]. Databases such as CPAD 2.0 [1] '
-    'collect experimentally verified amyloid and non-amyloid peptide sequences, providing an '
-    'established dataset for systematic model comparisons.'
+    'Prior bioinformatics studies show that primary sequence composition helps predict '
+    'peptide aggregation [8]. Deep learning architectures such as 1D-CNNs and LSTMs can extract '
+    'localized motifs and sequential dependencies directly from text sequences without manual '
+    'feature engineering [7]. Databases such as CPAD 2.0 [1] collect experimentally verified '
+    'amyloid and non-amyloid peptide sequences, providing an established dataset for '
+    'systematic model comparisons.'
 )
 set_text(P[169], bg_p1)
 insert_paragraphs_after(P[169], [bg_p2, bg_p3], style_source_p=P[169])
@@ -595,6 +592,7 @@ set_text(P[175], 'Table 2.1: Summary of Literature Reviewed.')
 
 # Populate Table 0 (Table 2.1)
 lit_table = doc.tables[0]
+set_cell_text(lit_table.rows[0].cells[4], 'Main Findings', bold=True)
 lit_rows = [
     ['Yu et al. [4]', '2025', 'Protein interaction prediction for AD using a multi-source protein features fusion framework', 'Graph Convolutional Network on a fused protein-protein interaction network', 'Achieved AUC = 0.8935 for AD-related protein interaction link prediction.'],
     ['Hassan et al. [5]', '2024', 'A multimodal approach for AD detection and classification using deep learning', 'VGG16 CNN feature extraction from MRI/PET scans', 'Showed deep convolutional features are effective for AD classification from imaging data.'],
@@ -622,8 +620,8 @@ lit_narrative = [
     ('Hassan et al. [5] built a multimodal deep learning pipeline using MRI and PET scans, '
      'fine-tuning a VGG16 convolutional network to classify disease stages. Their results '
      'showed that convolutional filters effectively capture structural brain changes. However, '
-     'clinical neuroimaging remains too expensive for broad population screening, highlighting '
-     'the value of sequence-based approaches.'),
+     'clinical neuroimaging remains too expensive for broad population screening, making '
+     'sequence-based computational screening a practical alternative.'),
     ('Rani et al. [6] examined tree-based algorithms on patient demographic and imaging data '
      'from the OASIS repository. By combining SMOTE oversampling with Random Forest and '
      'XGBoost, they achieved 87.84% accuracy. Their findings confirm that ensemble trees '
@@ -936,7 +934,7 @@ discussion_paras = [
      'findings by Wang et al. [7], who showed that convolutional filters effectively capture '
      'localized aggregation traits. Amyloid formation often depends on short, contiguous '
      'segments of 3 to 6 amino acids, such as the KLVFFA motif in amyloid-beta. Convolutional '
-     'filters slide across the sequence to detect these critical motifs regardless of where '
+     'filters slide across the sequence to detect these local motifs regardless of where '
      'they appear along the peptide chain.'),
     ('The Bidirectional LSTM ranked second, obtaining 80.30% accuracy, an F1-score of 0.8059, '
      'and an ROC-AUC of 0.8769, outperforming all classical baselines. By processing sequences '
@@ -1044,9 +1042,9 @@ insert_paragraphs_after(P[265],
 
 insert_paragraphs_after(P[266],
     ['Client-server communication follows HTTP/1.1 REST conventions, exchanging JSON payloads '
-     'through the /predict endpoint. We chose JSON over HTTP because the payload consists of a '
-     'short sequence string and scalar predictions, keeping the communication layer lightweight '
-     'and dependable.'],
+     'through the /predict endpoint. We used JSON formatted data rather than XML or custom '
+     'binary structures because the payloads contain only sequence strings and scalar prediction '
+     'values, keeping the interface simple and easy to debug.'],
     style_source_p=P[169])
 
 insert_paragraphs_after(P[269],
@@ -1182,8 +1180,8 @@ set_text(P[314],
     'F1-score of 0.8146, and an ROC-AUC of 0.8925. The Bidirectional LSTM achieved second place '
     'with 80.30% accuracy, while classical baselines performed between 76.56% and 77.81%. We also '
     'deployed the trained CNN in a Flask web application that provides real-time predictions, '
-    'probability scores, and risk badges. These results demonstrate that primary sequence '
-    'features provide a meaningful, non-invasive signal for preliminary amyloid risk evaluation.')
+    'probability scores, and risk badges. These results confirm that primary sequence '
+    'features provide a reliable, non-invasive signal for preliminary amyloid risk evaluation.')
 
 # 6.2 Limitation (Preserve Heading 3 style for P[315], set text in P[316])
 set_text(P[315], "Limitation")
@@ -1205,7 +1203,7 @@ set_text(P[316],
 # 6.3 Future Work (Preserve Heading 3 style for P[317], insert text after P[317])
 set_text(P[317], "Future Work")
 insert_paragraphs_after(P[317],
-    ['Future work can expand on this study in four key areas: '
+    ['Future work can expand on this study in four areas: '
      '(1) External Clinical Validation: testing the models on independent patient cohorts and '
      'cerebrospinal fluid (CSF) peptide samples to measure real-world diagnostic accuracy. '
      '(2) Pretrained Protein Language Models: evaluating transformer-based foundation models '
